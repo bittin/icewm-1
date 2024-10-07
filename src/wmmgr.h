@@ -56,6 +56,11 @@ public:
     YFrameWindow** end() const { return win + count; }
     YFrameWindow* operator[](int index) const { return win[index]; }
     operator bool() const { return win && count; }
+    void drop(int index) {
+        size_t bytes = (--count - index) * sizeof(YFrameWindow *);
+        memmove(win + index, win + index + 1, bytes);
+        win[count] = nullptr;
+    }
 private:
     YFrameWindow** win;
     int count;
@@ -256,6 +261,7 @@ public:
     void actionWindows(YAction action);
     void toggleDesktop();
     void cascadeWindows();
+    void focusOverlap();
 
     bool haveClients();
     void setupRootProxy();
@@ -266,7 +272,7 @@ public:
     void reflectKeyboard(int configIndex, mstring keyboard);
     void kbLayout();
 
-    static void doWMAction(WMAction action, bool putback = false);
+    static void doWMAction(WMAction action);
     void lockFocus() {
         //MSG(("lockFocus %d", lockFocusCount));
         lockFocusCount++;
@@ -329,6 +335,7 @@ private:
     };
 
     bool ignoreOverride(Window win, const XWindowAttributes& attr, int* layer);
+    bool isManageable(Window win, bool mapClient);
     bool tabbingClient(YFrameClient* client);
     YFrameClient* allocateClient(Window win, bool mapClient);
     YFrameWindow* allocateFrame(YFrameClient* client);
@@ -336,7 +343,6 @@ private:
     bool handleWMKey(const XKeyEvent &key, KeySym k, unsigned vm);
     void setWmState(WMState newWmState);
     void refresh();
-    void focusOverlap();
 
     IApp *app;
     YActionListener *wmActionListener;

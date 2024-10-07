@@ -23,6 +23,16 @@ YColorName WorkspaceButton::activeButtonFg(&clrWorkspaceActiveButtonText);
 YFont WorkspaceButton::normalButtonFont;
 YFont WorkspaceButton::activeButtonFont;
 
+ref<YImage> WorkspaceButton::normalGradient;
+ref<YImage> WorkspaceButton::activeGradient;
+
+void WorkspaceButton::freeFonts() {
+    normalButtonFont = null;
+    activeButtonFont = null;
+    normalGradient = null;
+    activeGradient = null;
+}
+
 WorkspaceButton::WorkspaceButton(int ws, YWindow *parent, WorkspaceDragger* d):
     super(parent, YAction()),
     fWorkspace(ws),
@@ -160,7 +170,7 @@ bool WorkspaceButton::handleTimer(YTimer *t) {
     return false;
 }
 
-void WorkspaceButton::inputReturn(YInputLine* input) {
+void WorkspaceButton::inputReturn(YInputLine* input, bool control) {
     if (input == fInput) {
         mstring text(input->getText());
         if (text != name()) {
@@ -210,11 +220,12 @@ void WorkspaceButton::setPosition(int x, int y) {
         show();
 }
 
-WorkspacesPane::WorkspacesPane(YWindow *parent):
+WorkspacesPane::WorkspacesPane(YWindow* parent, unsigned tall):
     super(parent),
     fActive(0),
     fDelta(0),
     fMoved(0),
+    fTall(tall),
     fSpeed(0),
     fTime(zerotime()),
     fMillis(16L),
@@ -232,7 +243,7 @@ WorkspacesPane::WorkspacesPane(YWindow *parent):
 void WorkspacesPane::createButtons() {
     fReconfiguring = true;
     unsigned width = 0;
-    unsigned height = smallIconSize + 8;
+    unsigned height = max(smallIconSize + 8, fTall);
     for (int i = 0, n = workspaceCount; i < n; ++i) {
         width += create(i, height)->width();
     }
@@ -244,6 +255,7 @@ void WorkspacesPane::createButtons() {
 void WorkspacesPane::resize(unsigned width, unsigned height) {
     bool save(fReconfiguring);
     fReconfiguring = true;
+    setSize(width, height);
     long limit = limitWidth(width);
     setSize(unsigned(limit), height);
     fReconfiguring = save;
@@ -253,6 +265,8 @@ void WorkspacesPane::resize(unsigned width, unsigned height) {
         fMoved = min(0, fMoved + excess);
         repositionButtons();
     }
+    else if (rightToLeft && (fReconfiguring | fRepositioning) == false)
+        repositionButtons();
 }
 
 long WorkspacesPane::limitWidth(long paneWidth) {
@@ -367,7 +381,24 @@ void WorkspacesPane::relabelButtons() {
 
 void WorkspacesPane::configure(const YRect2& r) {
     if ((fReconfiguring | fRepositioning) == false && r.resized()) {
-        repositionButtons();
+        if (pagerShowPreview && r.hh != r.old.hh && 1 < r.old.hh) {
+            rescaleButtons();
+        } else {
+            repositionButtons();
+        }
+    }
+}
+
+void WorkspacesPane::rescaleButtons() {
+    for (auto wk : fButtons) {
+        scale(wk, max(height(), fTall));
+    }
+    repositionButtons();
+    for (auto wk : fButtons) {
+        if (wk->x() < int(width()))
+            wk->show();
+        else
+            break;
     }
 }
 
@@ -383,23 +414,15 @@ void WorkspacesPane::updateButtons() {
         fDesktop = desktop->dimension();
         if (pagerShowPreview) {
             fMoved = 0;
-            for (auto wk : fButtons) {
-                scale(wk, height());
-            }
-            repositionButtons();
-            for (auto wk : fButtons) {
-                if (wk->x() < int(width()))
-                    wk->show();
-                else
-                    break;
-            }
+            rescaleButtons();
         }
     }
 
     int width = extent() - fMoved;
     for (int i = count(), n = workspaceCount; i < n; ++i) {
         WorkspaceButton* wk = create(i, height());
-        wk->setPosition(width + fMoved, 0);
+        int x = rightToLeft ? fButtons[0]->x() - wk->width() : width;
+        wk->setPosition(x + fMoved, 0);
         width += wk->width();
         if (wk->extent() > 0 && wk->x() < max(width, int(this->width())))
             wk->show();
@@ -407,7 +430,7 @@ void WorkspacesPane::updateButtons() {
 
     resize(width, height());
     int limit = int(this->width());
-    if (fMoved + width < limit) {
+    if (fMoved + width < limit || rightToLeft) {
         fMoved = limit - width;
         repositionButtons();
     }
@@ -497,8 +520,16 @@ void WorkspacesPane::setPressed(int ws, bool set) {
     }
 }
 
+int WorkspacesPane::extent() const {
+    return 0 < count() ?  max(last()->extent(), first()->extent()) : 0;
+}
+
+int WorkspacesPane::lowest() const {
+    return 0 < count() ?  min(last()->x(), first()->x()) : 0;
+}
+
 bool WorkspacesPane::limited() const {
-    return 0 < count() && (last()->extent() - fButtons[0]->x()) > int(width());
+    return extent() - lowest() > int(width());
 }
 
 void WorkspacesPane::drag(int ws, int dx, bool start, bool end) {
@@ -603,14 +634,33 @@ YColor WorkspaceButton::getColor() {
         : normalButtonFg ? normalButtonFg : YButton::getColor();
 }
 
+ref<YImage> WorkspaceButton::getGradient() {
+    if (isPressed()) {
+        if (activeGradient == null ?
+            workspacebuttonactivePixbuf != null :
+            (activeGradient->width() != width() ||
+             activeGradient->height() != height()))
+            activeGradient =
+                workspacebuttonactivePixbuf->scale(width(), height());
+        return activeGradient;
+    } else {
+        if (normalGradient == null ?
+            workspacebuttonPixbuf != null :
+            (normalGradient->width() != width() ||
+             normalGradient->height() != height()))
+            normalGradient = workspacebuttonPixbuf->scale(width(), height());
+        return normalGradient;
+    }
+}
+
 YSurface WorkspaceButton::getSurface() {
     return (isPressed()
             ? YSurface(activeButtonBg ? activeButtonBg : activeBackupBg,
                                    workspacebuttonactivePixmap,
-                                   workspacebuttonactivePixbuf)
+                                   getGradient())
             : YSurface(normalButtonBg ? normalButtonBg : normalBackupBg,
                        workspacebuttonPixmap,
-                       workspacebuttonPixbuf));
+                       getGradient()));
 }
 
 YDimension WorkspaceButton::getTextSize() {
@@ -654,7 +704,7 @@ void WorkspacesPane::repaintWorkspace(int ws) {
             ws = manager->activeWorkspace();
         }
         if (inrange(ws, 0, count() - 1)) {
-            fButtons[ws]->setStale();
+            index(ws)->setStale();
         }
     }
 }
@@ -679,13 +729,14 @@ void WorkspaceButton::paint(Graphics &g, const YRect& r) {
         }
 
         ref<YIcon> icon;
+        const bool dark = surface.color.isDark();
         YColor colors[] = {
             surface.color,
-            surface.color.brighter(),
-            surface.color.darker(),
+            dark ? surface.color.darker() : surface.color.brighter(),
+            dark ? surface.color.brighter() : surface.color.darker(),
             getColor(),
             YColor(), // getColor().brighter(),
-            getColor().darker()
+            dark ? getColor().brighter() : getColor().darker()
         };
 
         for (YFrameWindow *yfw = manager->bottomLayer(WinLayerBelow);

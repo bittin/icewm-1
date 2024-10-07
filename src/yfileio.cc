@@ -2,22 +2,15 @@
 #include "yfileio.h"
 #include "ytime.h"
 #include "base.h"
-#include <errno.h>
-#include <fcntl.h>
-#include <limits.h>
-#include <stdio.h>
-#include <string.h>
-#include <unistd.h>
-#include <sys/stat.h>
+#include "sysdep.h"
 
 filereader::filereader(const char* filename) :
-    nFd(open(filename, O_RDONLY)),
-    bCloses(true)
+    nFd(open(filename, O_RDONLY | O_NOCTTY))
 {
 }
 
 filereader::~filereader() {
-    if (nFd != -1 && bCloses)
+    if (nFd != -1)
         close(nFd);
 }
 
@@ -27,30 +20,6 @@ int filereader::read_all(char* buf, size_t buflen) {
         buf[len] = '\0';
     }
     return int(len);
-}
-
-fcsmart filereader::read_all() {
-    struct stat st;
-    if (nFd == -1) {
-    }
-    else if (fstat(nFd, &st) == 0) {
-        if (S_ISREG(st.st_mode)) {
-            if (st.st_size > 0) {
-                return read_size(st.st_size);
-            } else {
-                return read_loop();
-            }
-        }
-        else if (S_ISFIFO(st.st_mode) || S_ISSOCK(st.st_mode)) {
-            long timeout = -1L;
-            bool expired = false;
-            return read_pipe(timeout, &expired);
-        }
-    }
-    else {
-        fail("fstat");
-    }
-    return fcsmart();
 }
 
 fcsmart filereader::read_size(size_t size) {
@@ -157,5 +126,20 @@ fcsmart filereader::read_pipe(long timeout, bool* expired) {
     } else {
         return nothing;
     }
+}
+
+fcsmart filereader::read_path(const char* filename) {
+    struct stat st;
+    if (::stat(filename, &st) == 0) {
+        if (S_ISREG(st.st_mode)) {
+            if (st.st_size > 0)
+                return filereader(filename).read_size(st.st_size);
+            else
+                return filereader(filename).read_loop();
+        }
+        else if (S_ISFIFO(st.st_mode) || S_ISSOCK(st.st_mode))
+            return filereader(filename).read_pipe();
+    }
+    return fcsmart();
 }
 

@@ -25,6 +25,7 @@
 #include <assert.h>
 #include <X11/Xlib.h>
 #include <iconv.h>
+#include <ctype.h>
 
 const iconv_t invalid = iconv_t(-1);
 
@@ -37,7 +38,6 @@ public:
     iconv_t localer() const { return toLocale; }
     const char* localeName() const { return fLocaleName; }
     const char* codesetName() const { return fCodeset; }
-    const char* modifiers() const { return fModifiers; }
 
 private:
     void getConverters();
@@ -47,7 +47,6 @@ private:
     iconv_t toUnicode;
     iconv_t toLocale;
     const char* fLocaleName;
-    const char* fModifiers;
     const char* fCodeset;
 };
 
@@ -61,7 +60,6 @@ YConverter::YConverter(const char* localeName) :
                "Falling back to 'C' locale'."));
         fLocaleName = setlocale(LC_ALL, "C");
     }
-    fModifiers = XSetLocaleModifiers("");
     fCodeset = getCodeset();
 
     MSG(("locale: %s, MB_CUR_MAX: %zd, codeset: %s, endian: %c",
@@ -194,9 +192,6 @@ char* YLocale::localeString(const wchar_t* uStr, size_t uLen, size_t &lLen) {
 
     size_t lSize = 4 * uLen;
     char* lStr = new char[lSize + 1];
-#ifdef __NetBSD__
-    const
-#endif
     char* inbuf = (char *) uStr;
     char* outbuf = lStr;
     size_t inlen = uLen * sizeof(wchar_t);
@@ -230,9 +225,6 @@ wchar_t* YLocale::unicodeString(const char* lStr, size_t const lLen,
     iconv(instance->converter->unicode(), nullptr, nullptr, nullptr, nullptr);
 
     wchar_t* uStr(new wchar_t[lLen + 1]);
-#ifdef __NetBSD__
-    const
-#endif
     char* inbuf(const_cast<char *>(lStr));
     char* outbuf(reinterpret_cast<char *>(uStr));
     size_t inlen(lLen), outlen(4 * lLen);
@@ -320,6 +312,18 @@ char* YLocale::narrowString(const wchar_t* uStr, size_t uLen, size_t& lLen) {
 
     lLen = done;
     return dest;
+}
+
+const char *YLocale::getCheckedExplicitLocale(bool lctype)
+{
+    auto loc = setlocale(lctype ? LC_CTYPE : LC_MESSAGES, NULL);
+    if (loc == NULL)
+        return NULL;
+    return (islower(*loc & 0xff)
+        && islower(loc[1] & 0xff)
+        && !isalpha(loc[2] & 0xff))
+        ? loc
+        : NULL;
 }
 
 const char *YLocale::getLocaleName() {

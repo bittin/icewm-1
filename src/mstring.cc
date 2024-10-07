@@ -22,10 +22,9 @@ void MStringRef::create(const char* str, size_t len) {
     if (len) {
         alloc(len);
         if (str) {
-            strncpy(fStr->fStr, str, len);
-            fStr->fStr[len] = 0;
+            strncpy(fStr->fStr, str, len + 1);
         } else {
-            memset(fStr->fStr, 0, len + 1);
+            fStr->fStr[0]=0;
         }
     } else {
         fStr = nullptr;
@@ -45,9 +44,9 @@ mstring::mstring(const char* str1, size_t len1, const char* str2, size_t len2):
 {
     if (fRef) {
         if (len1)
-            strncpy(fRef->fStr, str1, len1);
+            strncpy(fRef->fStr, str1, len1 + 1);
         if (len2)
-            strncpy(fRef->fStr + len1, str2, len2);
+            strncpy(fRef->fStr + len1, str2, len2 + 1);
         fRef[fCount] = 0;
         fRef.acquire();
     }
@@ -355,6 +354,58 @@ mstring mstring::match(const char* regex, const char* flags) const {
         return null;
 
     return mstring(data() + pos.rm_so, size_t(pos.rm_eo - pos.rm_so));
+}
+
+#include <errno.h>
+#include <stdarg.h>
+
+void mstring::fmt(const char* fmt, ...) {
+    const int en = errno;
+    va_list ap;
+    va_start(ap, fmt);
+    size_t len = strlen(fmt);
+    for (const char* s = fmt; *s; ++s) {
+        if (*s == '%' && s[1]) {
+            s++;
+            if (*s == 's') {
+                len += strlen(va_arg(ap, const char *));
+            }
+            if (*s == 'm') {
+                len += strlen(strerror(en));
+            }
+        }
+    }
+    va_end(ap);
+    MStringRef ref(len);
+    va_start(ap, fmt);
+    int i = 0;
+    for (const char* s = fmt; *s; ++s) {
+        if (*s == '%' && s[1]) {
+            s++;
+            if (*s == 's') {
+                const char* arg = va_arg(ap, const char *);
+                for (int k = 0; arg[k]; ++k)
+                    ref[i++] = arg[k];
+            }
+            if (*s == 'm') {
+                const char* arg = strerror(en);
+                for (int k = 0; arg[k]; ++k)
+                    ref[i++] = arg[k];
+            }
+            if (*s == '%') {
+                ref[i++] = '%';
+            }
+        } else {
+            ref[i++] = *s;
+        }
+    }
+    ref[i] = '\0';
+    va_end(ap);
+    release();
+    fRef = ref;
+    fOffset = 0;
+    fCount = i;
+    acquire();
 }
 
 // vim: set sw=4 ts=4 et:

@@ -48,6 +48,10 @@ bool canSuspend() {
     return couldRunCommand(suspendCommand);
 }
 
+bool canHibernate() {
+    return couldRunCommand(hibernateCommand);
+}
+
 bool canShutdown(RebootShutdown reboot) {
     if (reboot == Shutdown && isEmpty(shutdownCommand))
         return false;
@@ -84,12 +88,13 @@ CtrlAltDelete::CtrlAltDelete(IApp* app, YWindow* parent)
         { _("_Logout..."), actionLogout, ICEWM_ACTION_LOGOUT },
         { _("Re_boot"), actionReboot, ICEWM_ACTION_REBOOT },
         { _("Shut_down"), actionShutdown, ICEWM_ACTION_SHUTDOWN },
+        { _("_Hibernate"), actionHibernate, ICEWM_ACTION_HIBERNATE },
         { _("_Window list"), actionWindowList, ICEWM_ACTION_WINDOWLIST },
         { _("_Restart icewm"), actionRestart, ICEWM_ACTION_RESTARTWM },
         { _("_About"), actionAbout, ICEWM_ACTION_ABOUT },
         { _("Reload win_options"), actionWinOptions, ICEWM_ACTION_WINOPTIONS },
         { _("Reload ke_ys"), actionReloadKeys, ICEWM_ACTION_RELOADKEYS },
-        { _("Clos_e"), actionClose, ICEWM_ACTION_NOP },
+        // { _("Clos_e"), actionClose, ICEWM_ACTION_NOP },
     };
     for (int i = 0; i < Count; ++i) {
         buttons[i] = new YActionButton(this, data[i].text, -2,
@@ -108,9 +113,11 @@ CtrlAltDelete::CtrlAltDelete(IApp* app, YWindow* parent)
         buttons[4]->setEnabled(false);
     if (!canShutdown(Shutdown))
         buttons[5]->setEnabled(false);
+    if (!canHibernate())
+        buttons[6]->setEnabled(false);
 
     setSize(HORZ + w + MIDH + w + MIDH + w + HORZ,
-            VERT + (h + MIDV) * (Count / 3) - MIDV + VERT);
+            VERT + (h + MIDV) * ((Count + 2) / 3) - MIDV + VERT);
 
     for (int i = 0; i < Count; ++i) {
         int x = HORZ + (i % 3) * (w + MIDH);
@@ -149,13 +156,20 @@ void CtrlAltDelete::actionPerformed(YAction action, unsigned int /*modifiers*/) 
     deactivate();
     for (int i = 0; i < Count; ++i) {
         if (action == *buttons[i]) {
-            if (inrange<int>(buttons[i]->wmAction, 2, 11))
+            if (inrange<int>(buttons[i]->wmAction, 2, 14))
                 manager->doWMAction(buttons[i]->wmAction);
             else if (action == actionLock && canLock())
                 app->runCommand(lockCommand);
             break;
         }
     }
+}
+
+int CtrlAltDelete::indexFocus() {
+    YWindow* w = getFocusWindow();
+    int i = Count;
+    while (i-- > 0 && w != buttons[i]);
+    return i;
 }
 
 bool CtrlAltDelete::handleKey(const XKeyEvent &key) {
@@ -172,11 +186,27 @@ bool CtrlAltDelete::handleKey(const XKeyEvent &key) {
             return true;
         }
         if ((k == XK_Down || k == XK_KP_Down) && m == 0) {
-            nextFocus(); nextFocus(); nextFocus();
+            int i = indexFocus();
+            if (i >= 0) {
+                for (int k = 3; k < Count; k += 3) {
+                    if (buttons[(i + k) % Count]->isFocusTraversable()) {
+                        setFocus(buttons[(i + k) % Count]);
+                        break;
+                    }
+                }
+            }
             return true;
         }
         if ((k == XK_Up || k == XK_KP_Up) && m == 0) {
-            prevFocus(); prevFocus(); prevFocus();
+            int i = indexFocus();
+            if (i >= 0) {
+                for (int k = Count - 3; 0 < k; k -= 3) {
+                    if (buttons[(i + k) % Count]->isFocusTraversable()) {
+                        setFocus(buttons[(i + k) % Count]);
+                        break;
+                    }
+                }
+            }
             return true;
         }
         if ((k == XK_End || k == XK_KP_End) && m == 0) {
@@ -188,20 +218,16 @@ bool CtrlAltDelete::handleKey(const XKeyEvent &key) {
             return true;
         }
         if ((k == XK_Prior || k == XK_KP_Prior) && m == 0) {
-            YWindow* w = getFocusWindow();
-            for (int i = 0; i < Count; ++i) {
-                if (w == buttons[i] && 3 <= i) {
-                    setFocus(buttons[i % 3]);
-                }
+            int i = indexFocus();
+            if (i >= 3) {
+                setFocus(buttons[i % 3]);
             }
             return true;
         }
         if ((k == XK_Next || k == XK_KP_Next) && m == 0) {
-            YWindow* w = getFocusWindow();
-            for (int i = 0; i < Count; ++i) {
-                if (w == buttons[i] && i < Count - 3) {
-                    setFocus(buttons[Count - 3 + i % 3]);
-                }
+            int i = indexFocus();
+            if (0 <= i && i < Count - 3) {
+                setFocus(buttons[Count - 3 + i % 3]);
             }
             return true;
         }
@@ -248,6 +274,15 @@ void CtrlAltDelete::handleVisibility(const XVisibilityEvent& vis) {
     if (vis.state > VisibilityUnobscured) {
         raise();
         xapp->sync();
+    }
+}
+
+void CtrlAltDelete::handleButton(const XButtonEvent &button) {
+    if (button.type == ButtonPress &&
+        button.button == Button1 &&
+        xapp->grabWindow() == this &&
+        YRect(0, 0, width(), height()).contains(button.x, button.y) == false) {
+        deactivate();
     }
 }
 

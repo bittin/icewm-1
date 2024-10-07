@@ -54,6 +54,7 @@ public:
     void createPointerWindows();
     void grabKeys();
 
+    void limitPos();
     void maybeFocus();
     void focus(bool canWarp = false);
     void activate(bool canWarp = false, bool curWork = true);
@@ -86,7 +87,7 @@ public:
     void wmHide();
     void wmShow();
     void wmLower();
-    void doLower();
+    void doLower(bool lff = false);
     void wmRaise();
     void doRaise();
     void wmClose();
@@ -125,11 +126,13 @@ public:
     YFrameTitleBar *titlebar();
     YClientContainer *container() const { return fContainer; }
 
-    void startMoveSize(int x, int y, int direction);
+    void netMoveSize(int x, int y, int direction);
 
     void startMoveSize(bool doMove, bool byMouse,
                        int sideX, int sideY,
                        int mouseXroot, int mouseYroot);
+    bool hasMoveSize() const { return movingWindow || sizingWindow; }
+    bool notMoveSize();
     void endMoveSize();
     void moveWindow(int newX, int newY);
     void manualPlace();
@@ -139,10 +142,11 @@ public:
     void snapTo(int &wx, int &wy);
 
     void drawMoveSizeFX(int x, int y, int w, int h);
-    int handleMoveKeys(const XKeyEvent &xev, int &newX, int &newY);
-    int handleResizeKeys(const XKeyEvent &key,
-                         int &newX, int &newY, int &newWidth, int &newHeight,
-                         int incX, int incY);
+    enum MoveState { MoveIgnore, MoveMoving, MoveCancel, MoveAccept, };
+    MoveState handleMoveKey(const XKeyEvent& xev, int& newX, int& newY);
+    MoveState handleResizeKey(const XKeyEvent& key, int& newX, int& newY,
+                               int& newWidth, int& newHeight,
+                               int incX, int incY);
     void handleMoveMouse(const XMotionEvent &motion, int &newX, int &newY);
     void handleResizeMouse(const XMotionEvent &motion,
                            int &newX, int &newY, int &newWidth, int &newHeight);
@@ -265,6 +269,7 @@ public:
         foNoIgnoreTaskBar          = (1 << 20),
         foClose                    = (1 << 22),
         foIgnoreOverrideRedirect   = (1 << 23),
+        foDoNotManage              = (1 << 24),
     };
 
     unsigned frameFunctions() const { return fFrameFunctions; }
@@ -373,8 +378,8 @@ public:
     Window clientLeader() const { return client()->clientLeader(); }
 
     bool isManaged() const { return fManaged; }
-    void setManaged(bool isManaged) { fManaged = isManaged; }
-
+    void setManaged(bool isManaged) { fManaged = isManaged;
+                                      if (fManaged) sendConfigure(); }
     void setAllWorkspaces();
 
     bool visibleOn(int workspace) const {
@@ -519,6 +524,7 @@ private:
 
     bool fHaveStruts;
     bool indicatorsCreated;
+    bool loweringByAction;
 
     enum WindowType fWindowType;
 

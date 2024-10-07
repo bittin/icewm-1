@@ -16,6 +16,7 @@
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <pwd.h>
 
 #if defined(__GXX_RTTI) && (__GXX_ABI_VERSION >= 1002)
@@ -30,6 +31,7 @@
 
 #include "intl.h"
 #include "ascii.h"
+#include "ypointer.h"
 
 using namespace ASCII;
 
@@ -102,7 +104,8 @@ void msg(char const *msg, ...) {
 void tlog(char const *msg, ...) {
     timeval now;
     gettimeofday(&now, nullptr);
-    struct tm *loc = localtime(&now.tv_sec);
+    struct tm tmbuf = {};
+    struct tm *loc = localtime_r(&now.tv_sec, &tmbuf);
 
     fprintf(stderr, "%02d:%02d:%02d.%03u: %s: ", loc->tm_hour,
             loc->tm_min, loc->tm_sec,
@@ -659,7 +662,7 @@ const char* getprogname() {
 
 // get path of executable.
 char* progpath() {
-#ifdef __linux__
+#if defined(__linux__) && defined(_GNU_SOURCE) && !defined(__ANDROID__)
     char* path = program_invocation_name;
     bool fail = (isEmpty(path) || !isExeFile(path));
     if (fail) {
@@ -693,10 +696,48 @@ char* progpath() {
     return path;
 }
 
+FILE* process_open(const char* path, const char* args[], int* pid) {
+    FILE* fp = nullptr;
+    int fds[2];
+    if (pipe(fds) == 0) {
+        *pid = fork();
+        if (*pid == -1) {
+            close(fds[0]); close(fds[1]);
+        }
+        else if (*pid == 0) {
+            close(fds[0]);
+            dup2(fds[1], 1);
+            close(fds[1]);
+            execv(path, (char * const *) args);
+            _exit(1);
+        }
+        else {
+            close(fds[1]);
+            fp = fdopen(fds[0], "r");
+            if (fp == nullptr)
+                close(fds[0]);
+        }
+    }
+    return fp;
+}
+
+int process_close(FILE* fp, int pid) {
+    if (fp)
+        fclose(fp);
+    int xit = -1;
+    if (pid > 0) {
+        int status = 0;
+        waitpid(pid, &status, 0);
+        if (WIFEXITED(status))
+            xit = WEXITSTATUS(status);
+    }
+    return xit;
+}
+
 void show_backtrace(const int limit) {
 #if defined(HAVE_BACKTRACE_SYMBOLS_FD) && defined(HAVE_EXECINFO_H)
     const int asize = Elvis(limit, 20);
-    void *array[asize];
+    asmart<void*> array(new void*[asize]);
     const int count = backtrace(array, asize);
     const char tool[] = "/usr/bin/addr2line";
     char* prog = progpath();
@@ -705,22 +746,22 @@ void show_backtrace(const int limit) {
     timeval now;
     gettimeofday(&now, nullptr);
     struct tm *loc = localtime(&now.tv_sec);
-    unsigned msec = (unsigned)(now.tv_usec / 1000);
+    unsigned msec = unsigned(now.tv_usec / 1000);
 
     fprintf(stderr, "%02d:%02d:%02d.%03u: %s:\n", loc->tm_hour, loc->tm_min,
             loc->tm_sec, msec, "backtrace"); fflush(stderr);
 
     int status(1);
     if (path && access(tool, X_OK) == 0) {
-        const size_t bufsize(1234);
-        char buf[bufsize];
-        snprintf(buf, bufsize, "%s -C -f -p -s -e '%s'", tool, path);
-        size_t len = strlen(buf);
-        for (int i = 0; i < count && len + 21 < bufsize; ++i) {
-            snprintf(buf + len, bufsize - len, " %p", array[i]);
-            len += strlen(buf + len);
+        const char* args[30] = { tool, "-C", "-f", "-p", "-s", "-e", path, };
+        char strings[20][32];
+        for (int i = 0; i < count; ++i) {
+            sprintf(strings[i], "%p", array[i]);
+            args[7 + i] = strings[i];
         }
-        FILE* fp = popen(buf, "r");
+        args[7 + count] = nullptr;
+        int pid = 0;
+        FILE* fp = process_open(tool, args, &pid);
         if (fp) {
             const int linesize(256);
             char line[linesize];
@@ -732,12 +773,10 @@ void show_backtrace(const int limit) {
                     fputs(line, stderr);
                 }
             }
-            if (pclose(fp) == 0 && lineCount >= count) {
+            if (process_close(fp, pid) == 0 && lineCount >= count) {
                 status = 0;
             }
         }
-        else
-            status = system(buf);
     }
     if (status) {
         backtrace_symbols_fd(array, count, 2);

@@ -478,6 +478,7 @@ public:
         if (type) fType = type;
         if (leng) fLength = leng;
         if (fWindow && fProp && fLength) {
+            fRequest = fProp;
             fStatus = XGetWindowProperty(display, fWindow, fProp, 0L,
                                          fLength, False, fType, &type,
                                          &fFormat, &fCount, &fAfter, &fData);
@@ -559,7 +560,11 @@ private:
     int fFormat, fStatus;
 
     YProperty& operator=(const YProperty& copy);
+
+public:
+    static Atom fRequest;
 };
+Atom YProperty::fRequest;
 
 class YCardinal : public YProperty {
 public:
@@ -720,6 +725,11 @@ public:
     YStringProperty(Window window, Atom property, Atom kind = AnyPropertyType) :
         YProperty(window, property, kind, BUFSIZ)
     {
+        checkString(kind);
+    }
+
+private:
+    void checkString(Atom kind) {
         if (status() == Success && kind == AnyPropertyType) {
             if (type() == ATOM_COMPOUND_TEXT) {
                 XTextProperty text = { data<unsigned char>(), type(),
@@ -737,6 +747,11 @@ public:
                 substitute(nullptr, XA_STRING);
             }
         }
+    }
+
+public:
+    YStringProperty(const YProperty& prop) : YProperty(prop) {
+        checkString(AnyPropertyType);
     }
 
     const char* operator&() const { return data<char>(); }
@@ -999,8 +1014,11 @@ public:
         }
     }
 
+    static YWindowTree lastClientList;
+
     void getClientList() {
         getWindowList(ATOM_NET_CLIENT_LIST);
+        lastClientList = *this;
     }
 
     void getSystrayList() {
@@ -1357,6 +1375,7 @@ private:
     vector<Window> fChildren;
     YTreeLeaf fLeaf;
 };
+YWindowTree YWindowTree::lastClientList;
 
 YTreeIter::operator Window() const { return fTree[fIndex]; }
 YTreeLeaf* YTreeIter::operator->() { return fTree.leaf(fIndex); }
@@ -1416,6 +1435,7 @@ private:
     void setBorderTitle(int border, int title);
     void sizeto();
     void sizeby();
+    void moveto();
     void detail();
     void extents();
     void details(Window window);
@@ -1469,6 +1489,7 @@ private:
     bool desktop();
     bool wmcheck();
     bool change();
+    void await();
     bool loop();
     bool pick();
     bool sync();
@@ -2144,6 +2165,70 @@ void IceSh::sizeby()
     }
 }
 
+void IceSh::moveto()
+{
+    char* xa = getArg();
+    char* ya = getArg();
+    char* xs = &xa[isSign(xa[0]) && isSign(xa[1])];
+    char* ys = &ya[isSign(ya[0]) && isSign(ya[1])];
+    bool xper = *xs && xs[strlen(xs)-1] == '%';
+    bool yper = *ys && ys[strlen(ys)-1] == '%';
+    if (xper) xs[strlen(xs)-1] = '\0';
+    if (yper) ys[strlen(ys)-1] = '\0';
+    bool xneg = (xa < xs && *xa == '-');
+    bool yneg = (ya < ys && *ya == '-');
+    long lx = 0, ly = 0;
+    float fx = 0, fy = 0;
+    if ((xper ? tofloat(xs, fx) : tolong(xs, lx)) &&
+        (yper ? tofloat(ys, fy) : tolong(ys, ly))) {
+        FOREACH_WINDOW(window) {
+            use(window);
+            Window frame = getFrameWindow(window);
+            if (frame) {
+                int ax = 0, ay = 0, aw = displayWidth(), ah = displayHeight();
+                long xpos = lx;
+                long ypos = ly;
+                if (xper | yper) {
+                    getArea(window, ax, ay, aw, ah);
+                }
+                int gx, gy, gw, gh;
+                if (::getGeometry(frame, gx, gy, gw, gh)) {
+                    if (xneg && xper) {
+                        xpos = ax + aw - long(fx * aw / 100.0f) - gw;
+                    }
+                    else if (xper) {
+                        xpos = ax + long(fx * aw / 100.0f);
+                    }
+                    else if (xneg) {
+                        xpos = displayWidth() - gw + lx;
+                    }
+                    xpos = clamp(xpos, -30000L, 30000L);
+
+                    if (yneg && yper) {
+                        ypos = ay + ah - long(fy * ah / 100.0f) - gh;
+                    }
+                    else if (yper) {
+                        ypos = ay + long(fy * ah / 100.0f);
+                    }
+                    else if (yneg) {
+                        ypos = displayHeight() - gh + ly;
+                    }
+                    ypos = clamp(ypos, -30000L, 30000L);
+
+                    moveResize(window, NorthWestGravity,
+                               xpos, ypos, None, None, CWX | CWY);
+                    modified(window);
+                } else {
+                    window.discard();
+                }
+            }
+        }
+    }
+    else {
+        invalidArgument("move parameters");
+    }
+}
+
 void IceSh::queryXembed(Window parent)
 {
     YWindowTree windowList(parent);
@@ -2796,6 +2881,46 @@ bool IceSh::guiEvents()
     return true;
 }
 
+void IceSh::await()
+{
+    windowList.release();
+    YWindowTree old = YWindowTree::lastClientList;
+    if (old == false)
+        old.getClientList();
+
+    running = true;
+    sighandler_t previous = signal(SIGINT, catcher);
+    XSelectInput(display, root, PropertyChangeMask);
+    while (running) {
+        if (XPending(display)) {
+            XEvent xev = { 0 };
+            XNextEvent(display, &xev);
+            if (xev.type == PropertyNotify &&
+                xev.xproperty.atom == ATOM_NET_CLIENT_LIST &&
+                xev.xproperty.state == PropertyNewValue)
+            {
+                YWindowTree now;
+                now.getClientList();
+                for (YTreeIter window(now); window; ++window) {
+                    if (old.have(window) == false)
+                        windowList.append(window);
+                }
+                if (windowList)
+                    break;
+                old = now;
+            }
+        }
+        else {
+            int fd = ConnectionNumber(display);
+            fd_set rfds;
+            FD_ZERO(&rfds);
+            FD_SET(fd, &rfds);
+            select(fd + 1, SELECT_TYPE_ARG234 &rfds, nullptr, nullptr, nullptr);
+        }
+    }
+    signal(SIGINT, previous);
+}
+
 bool IceSh::icewmAction()
 {
     static const Symbol sa[] = {
@@ -2807,8 +2932,11 @@ bool IceSh::icewmAction()
         { "windowlist", ICEWM_ACTION_WINDOWLIST },
         { "restart",    ICEWM_ACTION_RESTARTWM },
         { "suspend",    ICEWM_ACTION_SUSPEND },
+        { "hibernate",  ICEWM_ACTION_HIBERNATE },
         { "winoptions", ICEWM_ACTION_WINOPTIONS },
         { "keys",       ICEWM_ACTION_RELOADKEYS },
+        { "icewmbg",    ICEWM_ACTION_ICEWMBG },
+        { "refresh",    ICEWM_ACTION_REFRESH },
     };
     for (Symbol sym : sa) {
         if (0 == strcmp(*argp, sym.name)) {
@@ -3123,10 +3251,24 @@ static Window getClientWindow(Window frame)
                 Window subw = subs[k];
                 if (XGetWindowAttributes(display, subw, &attr) &&
                     0 < attr.map_state) {
-                    if (clist ? clist.have(subw) : WmName(cont) == "Container")
+                    if (clist && clist.have(subw))
                         return subw;
+                    if (subs.count() == 1) {
+                        WmName name(cont);
+                        if (name == "Container" || name == "TaskBarFrame")
+                            return subw;
+                    }
                 }
             }
+        }
+    }
+
+    if (WmName(frame) != "Frame") {
+        XWindowAttributes attr;
+        if (XGetWindowAttributes(display, frame, &attr) &&
+            0 < attr.map_state &&
+            attr.override_redirect == True) {
+            return frame;
         }
     }
 
@@ -3517,16 +3659,19 @@ void IceSh::showProperty(Window window, Atom atom, const char* prefix) {
             if (f & IconWindowHint) {
                 printf(" Window(0x%lx)", h->icon_window);
             }
+            if (f & XUrgencyHint) {
+                printf(" urgency");
+            }
             newline();
         }
         return;
     }
 
-    YProperty prop(window, atom, AnyPropertyType, 64);
+    YProperty prop(window, atom, AnyPropertyType, 256);
     if (prop.status() == Success && prop.data<void>()) {
         if (prop.format() == 8) {
             const char* name(atomName(atom));
-            printf("%s%s = ", prefix, (char*) name);
+            printf("%s%s = ", prefix, name);
             if (prop.type() == ATOM_GUI_EVENT) {
                 int gev = prop.data<unsigned char>(0);
                 if (inrange(1 + gev, 1, NUM_GUI_EVENTS)) {
@@ -3537,21 +3682,21 @@ void IceSh::showProperty(Window window, Atom atom, const char* prefix) {
                 char* s = prop.data<char>();
                 int num = int(prop.count());
                 for (int i = 0; i < num; ++i)
-                    if (s[i] == '\0')
+                    if (s[i] == '\0' || isWhiteSpace(s[i]))
                         s[i] = ' ';
                 printf("%*.*s\n", num, num, s);
             }
             else {
-                for (int i = 0; i < prop.count(); ++i) {
-                    unsigned char ch = prop.data<unsigned char>(i);
-                    if (ch == '\0') {
-                        if (i + 1 == prop.count()) {
-                            break;
-                        }
-                    }
-                    putchar(isPrint(ch) ? ch : '.');
+                YStringProperty strp(prop);
+                char* s = strp.data<char>();
+                int num = int(strp.count());
+                while (num > 0 && s[num - 1] == '\0')
+                    --num;
+                for (int i = 0; i < num; ++i) {
+                    if (s[i] == '\0' || isWhiteSpace(s[i]))
+                        s[i] = ' ';
                 }
-                newline();
+                printf("%*.*s\n", num, num, s);
             }
         }
         else if (prop.format() == 32) {
@@ -3688,18 +3833,28 @@ void IceSh::loadIcon(Window window, char* file)
 {
     int fd = open(file, O_RDONLY);
     if (0 <= fd) {
-        char head[128];
-        int width = 0, height = 0, depth = 0, maxval = 0, length = 0;
-        if (read(fd, head, sizeof head) == ssize_t(sizeof head) &&
-            strncmp(head, "P7\nWIDTH ", 9) == 0 &&
-            sscanf(head,
-                   "P7\nWIDTH %d\nHEIGHT %d\nDEPTH %d\n"
-                   "MAXVAL %d\nTUPLTYPE RGB_ALPHA\nENDHDR\n%n",
-                   &width, &height, &depth, &maxval, &length) == 4 &&
-            0 < width && width <= 256 &&
-            0 < height && height <= 256 &&
-            depth == 4 && maxval == 255 && 64 <= length)
+        const int headlen = 512;
+        char head[headlen + 2], *ptr;
+        int width = 0, height = 0, depth = 0, maxval = 0;
+        const size_t len = read(fd, head, headlen);
+        if (len > 3 && strncmp(head, "P7\n", 3) == 0 &&
+            (head[len] = '\0') == '\0' &&
+            (ptr = strstr(head, "\nWIDTH ")) != nullptr &&
+            sscanf(ptr + 7, "%d", &width) == 1 &&
+            (ptr = strstr(head, "\nHEIGHT ")) != nullptr &&
+            sscanf(ptr + 8, "%d", &height) == 1 &&
+            (ptr = strstr(head, "\nDEPTH ")) != nullptr &&
+            sscanf(ptr + 7, "%d", &depth) == 1 &&
+            (ptr = strstr(head, "\nMAXVAL ")) != nullptr &&
+            sscanf(ptr + 8, "%d", &maxval) == 1 &&
+            (ptr = strstr(head, "\nTUPLTYPE ")) != nullptr &&
+            strncmp(ptr + 10, "RGB_ALPHA\n", 10) == 0 &&
+            (ptr = strstr(head, "\nENDHDR\n")) != nullptr &&
+            inrange(width, 1, 256) &&
+            inrange(height, 1, 256) &&
+            depth == 4 && maxval == 255)
         {
+            ssize_t length = (ptr + 8 - head);
             unsigned* data = new unsigned[width * height];
             size_t size = sizeof(unsigned) * width * height;
             memset(data, 0, size);
@@ -4151,8 +4306,10 @@ void IceSh::unexpected()
 void IceSh::flags()
 {
     bool act = false;
+    bool man = false;
 
     while (haveArg()) {
+        man = false;
         if (conditional()) {
             /*ignore*/;
             act = true;
@@ -4169,7 +4326,7 @@ void IceSh::flags()
         else {
             act = true;
             if (icewmAction())
-                ;
+                man = true;
             else if (windowList)
                 parseAction();
             else if (selecting | filtering) {
@@ -4192,6 +4349,10 @@ void IceSh::flags()
     if (act == false) {
         msg(_("No actions specified."));
         throw 1;
+    }
+    if (man == true && windowList == false) {
+        // make windowList non-empty.
+        windowList += root;
     }
 }
 
@@ -4257,6 +4418,11 @@ void IceSh::flag(char* arg)
         windowList.release();
         queryDockapps();
         MSG(("dockapps windows selected"));
+        selecting = true;
+        return;
+    }
+    if (isOptArg(arg, "-Await", "")) {
+        await();
         selecting = true;
         return;
     }
@@ -4508,6 +4674,7 @@ void IceSh::spy()
         }
 #endif
     }
+    tzset();
     while (windowList) {
         XEvent event;
         XNextEvent(display, &event);
@@ -4522,7 +4689,8 @@ void IceSh::spyEvent(const XEvent& event)
 {
     Window window = event.xany.window;
     timeval now(walltime());
-    struct tm* local = localtime(&now.tv_sec);
+    struct tm tmbuf = {};
+    struct tm* local = localtime_r(&now.tv_sec, &tmbuf);
     int secs = local->tm_sec;
     int mins = local->tm_min;
     int mils = int(now.tv_usec / 1000L);
@@ -4797,19 +4965,22 @@ int IceSh::xerrors(Display* dpy, XErrorEvent* evt) {
 }
 
 void IceSh::xerror(XErrorEvent* evt) {
-    char message[80], req[80], number[80];
+    const int size = 80;
+    char message[size], req[size], number[size];
 
     if (evt->request_code == X_GetWindowAttributes)
         return;
-
-    snprintf(number, 80, "%d", evt->request_code);
-    XGetErrorDatabaseText(display, "XRequest",
-                          number, "",
-                          req, sizeof(req));
+    if (evt->request_code == X_GetProperty)
+        snprintf(req, size, "X_GetProperty(%s)", atomName(YProperty::fRequest));
+    else {
+        snprintf(number, size, "%d", evt->request_code);
+        XGetErrorDatabaseText(display, "XRequest", number,
+                              "", req, sizeof(req));
+    }
     if (req[0] == 0)
-        snprintf(req, 80, "[request_code=%d]", evt->request_code);
+        snprintf(req, size, "[request_code=%d]", evt->request_code);
 
-    if (XGetErrorText(display, evt->error_code, message, 80) != Success)
+    if (XGetErrorText(display, evt->error_code, message, size) != Success)
         *message = '\0';
 
     tlog("%s(0x%lx): %s", req, evt->resourceid, message);
@@ -4882,41 +5053,7 @@ void IceSh::parseAction()
             sizeby();
         }
         else if (isAction("move", 2)) {
-            const char* xa = getArg();
-            const char* ya = getArg();
-            const char* xs = &xa[isSign(xa[0]) && isSign(xa[1])];
-            const char* ys = &ya[isSign(ya[0]) && isSign(ya[1])];
-            long lx, ly;
-            if (tolong(xs, lx) && tolong(ys, ly)) {
-                FOREACH_WINDOW(window) {
-                    use(window);
-                    Window frame = getFrameWindow(window);
-                    if (frame) {
-                        int x, y, w, h;
-                        if (::getGeometry(frame, x, y, w, h)) {
-                            int tx, ty;
-                            if (xa < xs && *xa == '-') {
-                                tx = displayWidth() - w + lx;
-                            } else {
-                                tx = lx;
-                            }
-                            if (ya < ys && *ya == '-') {
-                                ty = displayHeight() - h + ly;
-                            } else {
-                                ty = ly;
-                            }
-                            moveResize(window, NorthWestGravity,
-                                       tx, ty, None, None, CWX | CWY);
-                            modified(window);
-                        } else {
-                            window.discard();
-                        }
-                    }
-                }
-            }
-            else {
-                invalidArgument("move parameters");
-            }
+            moveto();
         }
         else if (isAction("moveby", 2)) {
             const char* xs = getArg();
@@ -5318,9 +5455,15 @@ void IceSh::parseAction()
                 YNetState(window) -= NetSkipPager | NetSkipTaskbar;
         }
         else if (isAction("restore", 0)) {
-            FOREACH_WINDOW(window)
+            FOREACH_WINDOW(window) {
                 YNetState(window) -= NetFullscreen | NetShaded | NetDemands |
                                      NetHorizontal | NetVertical;
+                xsmart<XWMHints> h(XGetWMHints(display, window));
+                if (h && hasbit(h->flags, XUrgencyHint)) {
+                    h->flags &= ~XUrgencyHint;
+                    XSetWMHints(display, window, h);
+                }
+            }
             changeState(NormalState);
         }
         else if (isAction("denormal", 0)) {
@@ -5374,23 +5517,24 @@ void IceSh::parseAction()
         }
         else if (isAction("focusmodel", 0)) {
             FOREACH_WINDOW(window) {
+                bool input = true;
                 xsmart<XWMHints> h(XGetWMHints(display, window));
-                if (h) {
-                    bool input = (h->flags & InputHint) && (h->input & True);
-                    Atom* prot = nullptr;
-                    int count = 0;
-                    bool take = false;
-                    if (XGetWMProtocols(display, window, &prot, &count)) {
-                        for (int i = 0; i < count; ++i) {
-                            if (prot[i] == ATOM_WM_TAKE_FOCUS) {
-                                take = true;
-                            }
+                if (h && hasbit(h->flags, InputHint)) {
+                    input = (h->input & True);
+                }
+                Atom* prot = nullptr;
+                int count = 0;
+                bool take = false;
+                if (XGetWMProtocols(display, window, &prot, &count)) {
+                    for (int i = 0; i < count; ++i) {
+                        if (prot[i] == ATOM_WM_TAKE_FOCUS) {
+                            take = true;
                         }
                     }
-                    printf("0x%-8lx focusmodel %s\n", *window,
-                            input ? take ? "Locally" : "Passive"
-                                : take ? "Globally" : "NoInput");
                 }
+                printf("0x%-8lx focusmodel %s\n", *window,
+                        input ? take ? "Locally" : "Passive"
+                            : take ? "Globally" : "NoInput");
             }
         }
         else if (isAction("motif", 0)) {

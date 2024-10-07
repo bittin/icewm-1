@@ -6,14 +6,10 @@
 #include "config.h"
 
 #include "upath.h"
-#include <unistd.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <stdio.h>
-#include <fcntl.h>
+#include "sysdep.h"
 #include <fnmatch.h>
 #include "base.h"
-#include "yapp.h"
+#include "intl.h"
 
 const mstring upath::slash("/");
 const upath upath::rootPath(slash);
@@ -86,10 +82,25 @@ upath upath::replaceExtension(const char* ext) const {
 mstring upath::expand() const {
     int c = fPath[0];
     if (c == '~') {
-        int k = fPath[1];
-        if (k == -1 || isSeparator(k))
-            return (upath(userhome(nullptr)) +
-                    fPath.substring(size_t(min(2, length())))).fPath;
+        const int k = fPath.indexOf('/');
+        if (length() == 1) {
+            csmart home(userhome(nullptr));
+            return upath(home);
+        }
+        else if (k == 1) {
+            csmart home(userhome(nullptr));
+            return upath(home) + fPath.substring(1);
+        }
+        else if (k == -1) {
+            mstring user(fPath.substring(1, k - 1));
+            csmart home(userhome(user));
+            return upath(home);
+        }
+        else {
+            mstring user(fPath.substring(1, k - 1));
+            csmart home(userhome(user));
+            return upath(home) + fPath.substring(k);
+        }
     }
     else if (c == '$') {
         mstring m(fPath.match("^\\$[_A-Za-z][_A-Za-z0-9]*"));
@@ -101,6 +112,11 @@ mstring upath::expand() const {
         }
     }
     return fPath;
+}
+
+mstring upath::real() {
+    char buf[PATH_MAX];
+    return realpath(string(), buf);
 }
 
 bool upath::isAbsolute() const {
@@ -121,7 +137,12 @@ bool upath::isRelative() const {
 
 bool upath::fileExists() {
     struct stat sb;
-    return stat(&sb) == 0 && S_ISREG(sb.st_mode);
+    if (stat(&sb) == 0) {
+        if (S_ISREG(sb.st_mode))
+            return true;
+        errno = S_ISDIR(sb.st_mode) ? EISDIR : EINVAL;
+    }
+    return false;
 }
 
 off_t upath::fileSize() {
@@ -131,7 +152,25 @@ off_t upath::fileSize() {
 
 bool upath::dirExists() {
     struct stat sb;
-    return stat(&sb) == 0 && S_ISDIR(sb.st_mode);
+    if (stat(&sb) == 0) {
+        if (S_ISDIR(sb.st_mode))
+            return true;
+        errno = ENOTDIR;
+    }
+    return false;
+}
+
+bool upath::ensureDirectory() {
+    struct stat sb;
+    if (stat(&sb) == 0) {
+        if (S_ISDIR(sb.st_mode))
+            return true;
+        errno = EEXIST;
+    }
+    else if (mkdir() == 0)
+        return true;
+    fail(_("Unable to create directory %s"), string());
+    return false;
 }
 
 bool upath::isReadable() {
@@ -150,8 +189,16 @@ bool upath::isExecutable() {
     return access(X_OK) == 0;
 }
 
+bool upath::isSearchable() {
+    return access(R_OK | X_OK) == 0;
+}
+
 int upath::mkdir(int mode) {
     return ::mkdir(string(), mode_t(mode));
+}
+
+int upath::chdir() {
+    return ::chdir(string());
 }
 
 int upath::open(int flags, int mode) {
@@ -179,7 +226,7 @@ int upath::fnMatch(const char* pattern, int flags) {
 }
 
 fcsmart upath::loadText() {
-    return filereader(expand()).read_all();
+    return filereader::read_path(expand());
 }
 
 bool upath::copyFrom(upath from, int mode) {
@@ -240,6 +287,7 @@ bool upath::glob(mstring pattern, YStringArray& list, const char* flags) {
                 case 'C': flagbits |= GLOB_NOCHECK; break;
                 case 'E': flagbits |= GLOB_NOESCAPE; break;
                 case 'S': flagbits |= GLOB_NOSORT; break;
+                case 'T': flagbits |= GLOB_TILDE; break;
                 default: break;
             }
         }
@@ -259,6 +307,48 @@ bool upath::glob(mstring pattern, YStringArray& list, const char* flags) {
         globfree(&gl);
     }
     return okay;
+}
+
+void upath::redirectOutput(const char* outputFile) {
+    if (::nonempty(outputFile)) {
+        upath path(upath(outputFile).expand());
+        int fd = path.open(O_WRONLY | O_APPEND | O_CREAT | O_NOCTTY, 0600);
+        if (fd == -1) {
+            fail("open %s", path.string());
+        } else {
+            struct stat st;
+            if (path.stat(&st) == -1)
+                fail("stat %s", path.string());
+            else if (S_ISREG(st.st_mode)) {
+                struct flock fl = { 0, 0, 0, 0, 0 };
+                fl.l_type = F_WRLCK;
+                if (fcntl(fd, F_SETLK, &fl) == 0) {
+                    if (st.st_size > 5*1024 && ftruncate(fd, 0L) == -1)
+                        fail("ftruncate %s", path.string());
+                }
+            }
+            dup2(fd, 1);
+            dup2(fd, 2);
+            if (fd > 2)
+                close(fd);
+        }
+    }
+}
+
+mstring upath::cwd() {
+    char buf[PATH_MAX];
+    if (::getcwd(buf, PATH_MAX) == buf)
+        return mstring(buf);
+
+    char* home = getenv("HOME");
+    if (home && ::access(home, X_OK) == 0 && ::chdir(home) == 0)
+        return mstring(home);
+
+    csmart user(userhome(nullptr));
+    if (user && ::chdir(user) == 0)
+        return mstring(user);
+
+    return mstring("/");
 }
 
 // vim: set sw=4 ts=4 et:

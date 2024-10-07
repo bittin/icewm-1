@@ -240,20 +240,23 @@ int YApplication::mainLoop() {
 
     for (fExitLoop = fExitApp; (fExitApp | fExitLoop) == false; ) {
         bool didIdle = handleIdle();
-
+        int nfds = 0;
         fd_set read_fds;
         FD_ZERO(&read_fds);
         fd_set write_fds;
         FD_ZERO(&write_fds);
 
         for (YPollIterType iPoll = polls.iterator(); ++iPoll; ) {
-            PRECONDITION(iPoll->fd() >= 0);
+            const int fd = iPoll->fd();
+            PRECONDITION(fd >= 0);
             if (iPoll->forRead()) {
-                FD_SET(iPoll->fd(), &read_fds);
+                FD_SET(fd, &read_fds);
             }
             if (iPoll->forWrite()) {
-                FD_SET(iPoll->fd(), &write_fds);
+                FD_SET(fd, &write_fds);
             }
+            if (nfds <= fd)
+                nfds = fd + 1;
         }
 
         timeval timeout = {0, 0L};
@@ -266,7 +269,7 @@ int YApplication::mainLoop() {
 #endif
 
         int rc;
-        rc = select(sizeof(fd_set) * 8,
+        rc = select(nfds,
                     SELECT_TYPE_ARG234 &read_fds,
                     SELECT_TYPE_ARG234 &write_fds,
                     nullptr,
@@ -516,35 +519,28 @@ const upath& YApplication::getPrivConfDir(bool create) {
     static upath dir;
     if (dir.isEmpty()) {
         const char *env = getenv("ICEWM_PRIVCFG");
-        if (env) {
+        if (nonempty(env))
             dir = env;
-            if (create && ! dir.dirExists())
-                dir.mkdir();
-        }
         else {
+            const upath home = getHomeDir();
             env = getenv("XDG_CONFIG_HOME");
-            if (env)
-                dir = env;
-            else {
-                dir = getHomeDir() + "/.config";
-            }
-            dir += "/icewm";
-            if (!dir.dirExists()) {
-                dir = getHomeDir() + "/.icewm";
-                if (create && ! dir.dirExists())
-                    dir.mkdir();
-            }
+            if (nonempty(env))
+                dir = upath(env) + "/icewm";
+            else if (home != null)
+                dir = home + "/.config/icewm";
+            if ( !dir.dirExists())
+                dir = home + "/.icewm";
         }
         MSG(("using %s for private configuration files", dir.string()));
     }
-    else if (create && ! dir.dirExists()) {
-        dir.mkdir();
+    if (create && dir.nonempty()) {
+        dir.ensureDirectory();
     }
     return dir;
 }
 
-upath YApplication::getPrivConfFile(mstring basename, bool create) {
-    return getPrivConfDir(create) + basename;
+upath YApplication::getPrivConfFile(mstring basename) {
+    return getPrivConfDir() + basename;
 }
 
 upath YApplication::getHomeDir() {

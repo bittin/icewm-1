@@ -15,9 +15,9 @@
 =head2 DESCRIPTION
 
 Contains general settings like paths, colors and fonts, but also options
-to control the B<icewm> focus behaviour and the applets which are
+to control the B<icewm> focus behaviour and the applets that are
 started in the task bar.  The B<icewm> installation will provide a
-default F<preferences> file, which can be copied to the B<icewm> user
+default F<preferences> file, that can be copied to the B<icewm> user
 configuration directory and modified.
 
 =head2 FORMAT
@@ -41,6 +41,12 @@ Synchronize X11 for debugging (slow)
 
 Enable event logging for debugging
 
+=item B<OutputFile>=""
+
+Redirect all output to I<FILE>.
+A leading tilde or environment variable is expanded.
+This file is truncated on startup if it exceeds 5 KB.
+
 =item B<Splash>=""
 
 Splash image on startup (IceWM.jpg)
@@ -48,7 +54,7 @@ Splash image on startup (IceWM.jpg)
 =item B<Trace>=""
 
 Enable tracing for the given list of modules.
-Modules which are traceable include B<conf, font, icon, prog, systray>.
+Modules that are traceable include B<conf, font, icon, prog, systray>.
 
 =item B<ClickToFocus>=1
 
@@ -153,7 +159,7 @@ Turning this off allows the titlebar to cover the width of the screen.
 
 =item B<CenterMaximizedWindows>=0
 
-Center maximized windows which can't fit the screen (like terminals).
+Center maximized windows that can't fit the screen (like terminals).
 
 =item B<HideBordersMaximized>=0
 
@@ -495,7 +501,11 @@ Show windows from all workspaces on task bar.
 
 =item B<TaskBarShowWindowIcons>=1
 
-Show icons of windows on the task bar.
+Show icons of windows on task buttons of the task bar.
+
+=item B<TaskBarShowWindowTitles>=1
+
+Show titles of windows on task buttons of the task bar.
 
 =item B<TaskBarShowStartMenu>=1
 
@@ -561,7 +571,7 @@ Place workspace pager on top row when using dual-height taskbar.
 
 =item B<TaskBarWorkspacesLimit>=""
 
-Limit the number of taskbar workspaces buttons which are shown on the
+Limit the number of taskbar workspaces buttons that are shown on the
 workspaces pane of the taskbar. If the numeric value has a C<p> suffix
 then the limitation is in pixels. A C<%> suffix limits by percentage of
 desktop width. By default a C<B> suffix is assumed for number of buttons.
@@ -632,7 +642,7 @@ Favour Xft fonts over core X11 fonts where possible.
 
 =item B<MailBoxPath>=""
 
-A colon separated list of paths of your mailboxes.
+A list of paths of your mailboxes separated by spaces.
 If this is empty, $MAILPATH or $MAIL is used instead.
 
 Path to a mbox file. Remote mail boxes are accessed by specifying an URL
@@ -653,7 +663,7 @@ or C<%40> for the at sign.  For example:
 
 =item B<NetworkStatusDevice>="eth0 wlan0"
 
-Network device for which to show status.
+Network devices for which to show status.
 
 =item B<TimeFormat>="%X"
 
@@ -661,7 +671,7 @@ The clock time format. See the strftime manpage for the meaning of all
 the percent options. It is possible to define multiple clocks for
 different time zones in a single I<TimeFormat>.  A new clock is defined
 by the beginning of the string, and by each time zone specification
-which starts with C<TZ=...>, followed by a space. For example,
+that starts with C<TZ=...>, followed by a space. For example,
 B<TimeFormat>=C<%X TZ=Asia/Aden %T TZ=Asia/Baku %T> defines 3 clocks.
 
 =item B<TimeFormatAlt>=""
@@ -674,8 +684,9 @@ Clock Date format for tooltip (strftime format string).
 
 =item B<DockApps>="right high desktop"
 
-Support DockApps (right, left, center, down, high, above, below,
-desktop, or empty to disable). Control with Ctrl+Mouse.
+Support DockApps (right, left, center, down, high, above, dock, ontop,
+normal, below, desktop, or empty to disable). The first five control
+positioning, while the next six set the layer. Control with Ctrl+Mouse.
 
 =item B<XRRPrimaryScreenName>=""
 
@@ -723,7 +734,7 @@ Primary screen for xinerama (taskbar, ...).
 A comma-separated list of keyboard layouts.
 A layout may be enclosed in double quotes.
 Each layout is a name with optional arguments,
-which is to be parsed by the C<setxkbmap> program.
+that is to be parsed by the C<setxkbmap> program.
 To support changing keyboard layouts, the
 C<setxkbmap> program must be installed.
 The first in the list is the default layout.
@@ -933,14 +944,14 @@ Desktop mouse-button click to show the root menu.
 
 =item B<TitleBarMaximizeButton>=1  [0-5]
 
-Title bar mouse-button double click to maximize the window to full
+Title bar mouse-button double-click to maximize the window to full
 screen with the frame border visible.
 Press Shift to maximize only in the vertical direction.
 Press Alt+Shift to maximize only in the horizontal direction.
 
 =item B<TitleBarRollupButton>=2  [0-5]
 
-Title bar mouse-button double click to rollup the window.
+Title bar mouse-button double-click to rollup the window.
 Press Shift to maximize in the horizontal direction.
 
 =back
@@ -1026,17 +1037,21 @@ Command to start logout.
 
 Command to cancel logout.
 
-=item B<ShutdownCommand>="/bin/sh -c "{ test -e /run/systemd/system && systemctl poweroff; } ||:""
+=item B<ShutdownCommand>="/bin/sh -c "{ test -e /run/systemd/system && systemctl poweroff || loginctl poweroff; }""
 
 Command to shutdown the system.
 
-=item B<RebootCommand>="/bin/sh -c "{ test -e /run/systemd/system && systemctl reboot; } ||:""
+=item B<RebootCommand>="/bin/sh -c "{ test -e /run/systemd/system && systemctl reboot || loginctl reboot; }""
 
 Command to reboot the system.
 
-=item B<SuspendCommand>="test -e /run/systemd/system && systemctl suspend"
+=item B<SuspendCommand>="test -e /run/systemd/system && systemctl suspend || loginctl suspend"
 
 Command to send the system to standby mode
+
+=item B<SuspendCommand>="test -e /run/systemd/system && systemctl hibernate || loginctl hibernate"
+
+Command to hibernate the system.
 
 =item B<CPUStatusCommand>="xterm -name top -title Process\ Status -e top"
 
@@ -1732,19 +1747,11 @@ Incoming load on the network monitor.
 
 Idle (non) load on the network monitor, leave empty to force transparency.
 
-=item B<DesktopBackgroundColor>=""
-
-Desktop background color(s).
-
-=item B<DesktopTransparencyColor>=""
-
-Color(s) to announce for semitransparent windows.
-
 =back
 
 =head3 DESKTOP BACKGROUND
 
-The following preferences are read by L<icewmbg(1)>:
+The following themeable preferences are read by L<icewmbg(1)>:
 
 =over
 
@@ -1758,11 +1765,13 @@ Resize desktop background to full screen.
 
 =item B<DesktopBackgroundColor>=""
 
-Desktop background color(s).
+A comma-separated list of zero or more desktop background colors.
 
 =item B<DesktopBackgroundImage>=""
 
-Desktop background image(s).
+A comma-separated list of zero or more desktop background images.
+Each image may be a path with a L<glob(7)> pattern, or start with a
+tilde or environment variable.
 
 =item B<ShuffleBackgroundImages>=0  0/1
 
@@ -1779,6 +1788,7 @@ Color(s) to announce for semitransparent windows.
 =item B<DesktopTransparencyImage>=""
 
 Image(s) to announce for semitransparent windows.
+This is a list similar to B<DesktopBackgroundImage>.
 
 =item B<DesktopBackgroundMultihead>=0  0/1
 

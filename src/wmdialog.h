@@ -18,11 +18,14 @@ public:
     virtual void configure(const YRect2& rect);
     virtual void repaint();
     virtual void handleVisibility(const XVisibilityEvent&);
+    virtual void handleButton(const XButtonEvent &button);
 
     void activate();
     void deactivate();
 
 private:
+    int indexFocus();
+
     IApp *app;
     enum { Count = 12, };
     YActionButton* buttons[Count];

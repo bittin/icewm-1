@@ -85,12 +85,14 @@ libice_la_SOURCES = \
 	argument.h \
 	ascii.h \
 	base.h \
-	binascii.h \
+	bindkey.cc \
 	bindkey.h \
 	debug.h \
 	default.h \
 	guievent.h \
 	intl.h \
+	keysyms.cc \
+	keysyms.h \
 	logevent.cc \
 	logevent.h \
 	misc.cc \
@@ -297,7 +299,6 @@ icewm_SOURCES = \
 	ymsgbox.h \
 	ydialog.cc \
 	ydialog.h \
-	binascii.h \
 	yurl.cc \
 	yurl.h \
 	yrect.h \
@@ -346,6 +347,8 @@ icewm_SOURCES = \
 	ascii.h \
 	themes.cc \
 	themes.h \
+	theminst.cc \
+	theminst.h \
 	decorate.cc \
 	browse.cc \
 	browse.h \

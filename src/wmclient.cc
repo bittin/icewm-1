@@ -113,6 +113,7 @@ YFrameClient::~YFrameClient() {
     if (fSizeHints) { XFree(fSizeHints); fSizeHints = nullptr; }
     if (fHints) { XFree(fHints); fHints = nullptr; }
     if (fClientItem) { fClientItem->goodbye(); fClientItem = nullptr; }
+    if (fPinging) { fPingTimer = null; }
 }
 
 void YFrameClient::getProtocols(bool force) {
@@ -457,17 +458,32 @@ bool YFrameClient::handleTimer(YTimer* timer) {
             }
             else if (fPid > 0) {
                 char* res = classHint()->resource();
+                if (res && strlen(res) > 47L) {
+                    char* dot = strchr(res, '.');
+                    if (dot && inrange<long>(dot - res, 8L, 48L))
+                        *dot = '\0';
+                    else
+                        res[47] = '\0';
+                }
                 char buf[234];
                 snprintf(buf, sizeof buf,
                          _("Client %s with PID %ld fails to respond.\n"
                            "Do you wish to terminate this client?\n"),
-                         res, fPid);
+                         res ? res : "''", fPid);
                 fFrame->wmConfirmKill(buf);
                 free(res);
             }
             else {
                 fFrame->wmConfirmKill();
             }
+        }
+    }
+    if (fUrgencyTimer == timer) {
+        fUrgencyTimer = null;
+        xsmart<XWMHints> h(XGetWMHints(xapp->display(), handle()));
+        if (h && hasbit(h->flags, XUrgencyHint)) {
+            h->flags &= ~XUrgencyHint;
+            XSetWMHints(xapp->display(), handle(), h);
         }
     }
 
@@ -652,19 +668,7 @@ void YFrameClient::handleProperty(const XPropertyEvent &property) {
 
     case XA_WM_HINTS:
         if (new_prop) prop.wm_hints = true;
-        {
-            Drawable oldPix = iconPixmapHint();
-            Drawable oldMask = iconMaskHint();
-            bool oldUrge = urgencyHint();
-            getWMHints();
-            if (oldPix != iconPixmapHint() || oldMask != iconMaskHint()) {
-                refreshIcon();
-            }
-            if (oldUrge != urgencyHint()) {
-                if (getFrame())
-                    getFrame()->setWmUrgency(urgencyHint());
-            }
-        }
+        updateWMHints();
         prop.wm_hints = new_prop;
         break;
 
@@ -951,8 +955,8 @@ void YFrameClient::handleClientMessage(const XClientMessageEvent &message) {
                message.format == 32)
     {
         if (getFrame())
-            getFrame()->startMoveSize(message.data.l[0], message.data.l[1],
-                                      message.data.l[2]);
+            getFrame()->netMoveSize(message.data.l[0], message.data.l[1],
+                                    message.data.l[2]);
     } else if (message.message_type == _XA_NET_MOVERESIZE_WINDOW) {
         if (getFrame()) {
             long flag = message.data.l[0];
@@ -1274,6 +1278,33 @@ Pixmap YFrameClient::iconPixmapHint() const {
 
 Pixmap YFrameClient::iconMaskHint() const {
     return wmHint(IconMaskHint) ? fHints->icon_mask : None;
+}
+
+void YFrameClient::updateWMHints() {
+    Drawable oldPix = iconPixmapHint();
+    Drawable oldMask = iconMaskHint();
+    bool oldUrgency = urgencyHint();
+    getWMHints();
+    if (oldPix != iconPixmapHint() || oldMask != iconMaskHint()) {
+        refreshIcon();
+    }
+    if (fUrgencyTimer) {
+        if (urgencyHint() == false)
+            fUrgencyTimer = null;
+        else if (getFrame() && getFrame()->focused())
+            fHints->flags &= ~XUrgencyHint;
+    }
+    if (oldUrgency != urgencyHint()) {
+        if (getFrame())
+            getFrame()->setWmUrgency(urgencyHint());
+    }
+}
+
+void YFrameClient::clearUrgency() {
+    if (urgencyHint()) {
+        fHints->flags &= ~XUrgencyHint;
+        fUrgencyTimer->setTimer(500L, this, true);
+    }
 }
 
 bool YFrameClient::isDockApp() const {

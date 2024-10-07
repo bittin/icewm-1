@@ -6,6 +6,7 @@
 #include "MwmUtil.h"
 #include "ypointer.h"
 #include "yxcontext.h"
+#include "yconfig.h"
 #include "guievent.h"
 #include "intl.h"
 #undef override
@@ -502,9 +503,9 @@ void YXApplication::initModifiers() {
             for (int k = 0; k < xmk->max_keypermod; k++, c++) {
                 if (*c == NoSymbol)
                     continue;
-                KeySym kc = XkbKeycodeToKeysym(xapp->display(), *c, 0, 0);
+                KeySym kc = keyCodeToKeySym(*c);
                 if (kc == NoSymbol)
-                    kc = XkbKeycodeToKeysym(xapp->display(), *c, 0, 1);
+                    kc = keyCodeToKeySym(*c, 1);
                 if (kc == XK_Num_Lock && NumLockMask == 0)
                     NumLockMask = (1 << m);
                 if (kc == XK_Scroll_Lock && ScrollLockMask == 0)
@@ -600,6 +601,11 @@ void YXApplication::initModifiers() {
          AltMask, MetaMask, SuperMask, HyperMask, WinMask, ModeSwitchMask,
          NumLockMask, ScrollLockMask));
 
+    fKeycodeMin = fKeycodeMax = fKeysymsPer = 0;
+    if (fKeycodeMap) {
+        XFree(fKeycodeMap);
+        fKeycodeMap = nullptr;
+    }
 }
 
 bool YXApplication::hasControlAlt(unsigned state) const {
@@ -622,11 +628,14 @@ void YXApplication::dispatchEvent(YWindow *win, XEvent &xev) {
                 w = w->getFocusWindow();
         }
 
-        for (; w && (w->handleKey(xev.xkey) == false); w = w->parent()) {
+        for (; w; w = w->parent()) {
+            if (w->destroyed() || w->handleKey(xev.xkey))
+                break;
             if (fGrabTree && w == fXGrabWindow)
                 break;
         }
-    } else {
+    } else if (win->destroyed() == false ||
+               xev.type == DestroyNotify || xev.type == UnmapNotify) {
         Window child;
 
         if (xev.type == MotionNotify) {
@@ -692,7 +701,7 @@ void YXApplication::handleGrabEvent(YWindow *winx, XEvent &xev) {
         }
         if (win.ptr == nullptr)
             return ;
-        {
+        else {
             YWindow *p = win.ptr;
             for (; p; p = p->parent()) {
                 if (p == fXGrabWindow)
@@ -810,6 +819,7 @@ bool YXApplication::filterEvent(const XEvent &xev) {
         }
 
         initModifiers();
+        keyboardRemap();
 
         desktop->grabKeys();
         desktop->kbLayout();
@@ -1072,8 +1082,13 @@ YXApplication::YXApplication(int *argc, char ***argv, const char *displayName):
     lastEventTime(CurrentTime),
     fPopup(nullptr),
     xfd(this),
+    fXIM(initInput(fDisplay)),
     fXGrabWindow(nullptr),
     fGrabWindow(nullptr),
+    fKeycodeMap(nullptr),
+    fKeycodeMin(0),
+    fKeycodeMax(0),
+    fKeysymsPer(0),
     fGrabTree(false),
     fGrabMouse(false),
     fReplayEvent(false)
@@ -1087,6 +1102,17 @@ YXApplication::YXApplication(int *argc, char ***argv, const char *displayName):
 
     initAtoms();
     initModifiers();
+}
+
+XIM YXApplication::initInput(Display* dpy) {
+    XSetLocaleModifiers("");
+
+    XIM xim = XOpenIM(dpy, None, nullptr, nullptr);
+    if (xim == nullptr) {
+        XSetLocaleModifiers("@im=none");
+        xim = XOpenIM(dpy, None, nullptr, nullptr);
+    }
+    return xim;
 }
 
 void YExtension::init(Display* dis, QueryFunc ext, QueryFunc ver) {
@@ -1128,6 +1154,10 @@ void YXApplication::initExtensions(Display* dpy) {
 YXApplication::~YXApplication() {
     if (fColormap32)
         XFreeColormap(display(), fColormap32);
+    if (fKeycodeMap)
+        XFree(fKeycodeMap);
+    if (fXIM)
+        XCloseIM(fXIM);
 
     xfd.unregisterPoll();
     XCloseDisplay(display());
@@ -1144,7 +1174,6 @@ bool YXApplication::handleXEvents() {
 #ifdef DEBUG
         xeventcount++;
 #endif
-        //msg("%d", xev.type);
 
         saveEventTime(xev);
 
@@ -1164,6 +1193,8 @@ bool YXApplication::handleXEvents() {
 #endif
         }
 #endif
+        if (XFilterEvent(&xev, None))
+            continue;
 
         if (filterEvent(xev)) {
         } else {
@@ -1234,12 +1265,18 @@ void YXApplication::handleWindowEvent(Window xwindow, XEvent &xev) {
                     xev.xmaprequest.parent));
                 desktop->handleEvent(xev);
             }
+            else if (windowExists(xev.xmaprequest.window)) {
+                desktop->handleEvent(xev);
+            }
         } else if (xev.type == ConfigureRequest) {
             if (xev.xconfigurerequest.window != ignorable) {
                 TLOG(("APP BUG? configureRequest for window %lX "
                       "sent to destroyed frame %lX!",
                     xev.xconfigurerequest.window,
                     xev.xconfigurerequest.parent));
+                desktop->handleEvent(xev);
+            }
+            else if (windowExists(xev.xconfigurerequest.window)) {
                 desktop->handleEvent(xev);
             }
         }
@@ -1356,6 +1393,74 @@ void YXApplication::queryMouse(int* x, int* y) {
     if (XQueryPointer(display(), desktop->handle(),
                       &root, &child, x, y, &wx, &wy, &mask) == False)
         *x = *y = 0;
+}
+
+bool WMKey::set(const char* arg) {
+    bool change = false;
+    if (isEmpty(arg)) {
+        key = mod = 0;
+        if (nonempty(name)) {
+            name = "";
+            change = true;
+            initial = true;
+        }
+    }
+    else if (xapp->parseKey(arg, &key, &mod)) {
+        if (initial == false)
+            delete[] const_cast<char *>(name);
+        name = newstr(arg);
+        initial = false;
+        change = true;
+    }
+    return change;
+}
+
+bool WMKey::parse() {
+    return (nonempty(name) && xapp->parseKey(name, &key, &mod));
+}
+
+bool YXApplication::parseKey(const char* arg, KeySym* key, unsigned* mod) {
+    bool yes = YConfig::parseKey(arg, key, mod);
+    if (yes)
+        unshift(key, mod);
+    return yes;
+}
+
+void YXApplication::unshift(KeySym* ksym, unsigned* mod) {
+    const unsigned key = unsigned(*ksym);
+    if ((' ' < key && key < 'a') || ('z' < key && key <= 0xFF) ||
+        (0x1008FE01U <= key && key <= 0x1008FFFFU)) /*XF86keysyms*/
+    {
+        if (fKeycodeMap == nullptr) {
+            XDisplayKeycodes(xapp->display(), &fKeycodeMin, &fKeycodeMax);
+            fKeycodeMap = XGetKeyboardMapping(xapp->display(), fKeycodeMin,
+                                              fKeycodeMax - fKeycodeMin + 1,
+                                              &fKeysymsPer);
+        }
+        if (fKeycodeMap && 1 < fKeycodeMax && 1 < fKeysymsPer) {
+            const int lo = fKeycodeMin;
+            int un = 0, sh = 0;
+            for (int i = lo; i <= fKeycodeMax; ++i) {
+                if (fKeycodeMap[(i - lo) * fKeysymsPer] == key && un == 0)
+                    un = i;
+                if (fKeycodeMap[(i - lo) * fKeysymsPer + 1] == key && sh == 0)
+                    sh = i;
+            }
+            if (sh && un == 0 && fKeycodeMap[(sh - lo) * fKeysymsPer]) {
+                *ksym = fKeycodeMap[(sh - lo) * fKeysymsPer];
+                *mod |= ShiftMask;
+            }
+        }
+    }
+}
+
+KeySym YXApplication::keyCodeToKeySym(unsigned keycode, unsigned index) {
+    return XkbKeycodeToKeysym(display(), KeyCode(keycode), 0, index);
+}
+
+bool YXApplication::windowExists(Window handle) const {
+    XWindowAttributes attributes;
+    return XGetWindowAttributes(display(), handle, &attributes);
 }
 
 void YXPoll::notifyRead() {

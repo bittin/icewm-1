@@ -9,13 +9,14 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <fnmatch.h>
+#include <errno.h>
 
 char const *ApplicationName = "strtest";
 static const char source[] = __FILE__;
 
 #define equal(p, s)     (mstring(p) == mstring(s))
 
-#define expect(u, s)    if (++testsrun, (u) == mstring(s) && equal(u, s)) \
+#define expect(u, s)    if (++testsrun, mstring(s).equals(u) && equal(u, s)) \
         ++passed; else test_failed(u, s, __LINE__)
 
 // XXX: those argument ordering and purpose := strange.
@@ -256,6 +257,14 @@ static void test_mstring()
     expect(u, "#fffff");
     u = mstring("f#ffffff").match("#f{5}");
     expect(u, "#fffff");
+
+    u.fmt("abc %s ghi", "def");
+    expect(u, "abc def ghi");
+    u.fmt("%s %s %s", "abc", "def", "ghi");
+    expect(u, "abc def ghi");
+    errno = EFAULT;
+    u.fmt("%m");
+    expect(u, strerror(errno));
 }
 
 static void test_upath()
@@ -358,6 +367,8 @@ static void test_upath()
         expect(hm.expand(), getenv("HOME"));
         hm = "~/";
         assert(strlen(hm.expand()), 1 + strlen(getenv("HOME")));
+        hm = "~/bin";
+        assert(strlen(hm.expand()), 4 + strlen(getenv("HOME")));
     }
     upath hm = "$HOME";
     expect(hm.expand(), getenv("HOME"));

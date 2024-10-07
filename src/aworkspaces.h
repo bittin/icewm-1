@@ -32,7 +32,7 @@ public:
     bool isStale() const { return fStale; }
     int extent() const { return x() + int(width()); }
     virtual void repaint();
-    static void freeFonts() { normalButtonFont = null; activeButtonFont = null; }
+    static void freeFonts();
 
 private:
     virtual void handleButton(const XButtonEvent &button);
@@ -54,8 +54,9 @@ private:
     virtual YColor   getColor();
     virtual YSurface getSurface();
     virtual YDimension getTextSize();
+    ref<YImage> getGradient();
 
-    virtual void inputReturn(YInputLine* input);
+    virtual void inputReturn(YInputLine* input, bool control);
     virtual void inputEscape(YInputLine* input);
     virtual void inputLostFocus(YInputLine* input);
     virtual void paint(Graphics &g, const YRect &r);
@@ -81,6 +82,9 @@ private:
 
     static YFont normalButtonFont;
     static YFont activeButtonFont;
+
+    static ref<YImage> normalGradient;
+    static ref<YImage> activeGradient;
 };
 
 class WorkspaceIcons {
@@ -113,7 +117,7 @@ class WorkspacesPane:
     typedef AWorkspaces super;
 
 public:
-    WorkspacesPane(YWindow *parent);
+    WorkspacesPane(YWindow* parent, unsigned tall);
     ~WorkspacesPane() { WorkspaceButton::freeFonts(); }
 
     virtual void repaint();
@@ -130,6 +134,7 @@ private:
     int fActive;
     int fDelta;
     int fMoved;
+    unsigned fTall;
     double fSpeed;
     timeval fTime;
     long const fMillis;
@@ -149,13 +154,16 @@ private:
     int count() const { return fButtons.getCount(); }
     IterType iterator() { return fButtons.iterator(); }
     WorkspaceButton* last() const { return fButtons[count()-1]; }
-    int extent() const { return 0 < count() ? last()->extent() : 0; }
+    WorkspaceButton* first() const { return fButtons[0]; }
+    int extent() const;
+    int lowest() const;
     bool limited() const;
 
     WorkspaceButton* create(int workspace, unsigned height);
     void scale(WorkspaceButton* button, unsigned height);
     void label(WorkspaceButton* wk);
     void createButtons();
+    void rescaleButtons();
     void repositionButtons();
     void resize(unsigned width, unsigned height);
     long limitWidth(long paneWidth);

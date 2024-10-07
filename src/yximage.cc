@@ -136,6 +136,22 @@ bool YImage::supportsDepth(unsigned depth) {
     return depth == 32 || depth == xapp->depth();
 }
 
+bool YImage::supportsFormat(const char* format) {
+    if (strcmp(format, "xbm") == 0)
+        return true;
+    else if (strcmp(format, "xpm") == 0)
+        return true;
+#ifdef CONFIG_LIBPNG
+    else if (strcmp(format, "png") == 0)
+        return true;
+#endif
+#ifdef CONFIG_LIBJPEG
+    else if (strcmp(format, "jpg") == 0 || strcmp(format, "jpeg") == 0)
+        return true;
+#endif
+    return false;
+}
+
 ref<YImage> YImage::load(upath filename)
 {
     ref<YImage> image;
@@ -174,10 +190,6 @@ ref<YImage> YImage::load(upath filename)
     if (image == null && !unsup)
         fail(_("Could not load image \"%s\""), filename.string());
     return image;
-}
-
-ref<YImage> YImage::loadsvg(upath) {
-    return null;
 }
 
 mstring YXImage::detectImageType(upath filename) {

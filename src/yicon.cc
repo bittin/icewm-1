@@ -3,6 +3,7 @@
  *
  * Copyright (C) 1997-2001 Marko Macek
  */
+#include <algorithm>
 #include "config.h"
 #include "ypaint.h"
 #include "yicon.h"
@@ -26,7 +27,7 @@ YIcon::YIcon(upath filename) :
         loadedH(false), fCached(false), fPath(filename.expand())
 {
     // don't attempt to load if icon is disabled
-    if (fPath == "none" || fPath == "-")
+    if (fPath.equals("none") || fPath.equals("-"))
         loadedS = loadedL = loadedH = true;
 }
 
@@ -48,8 +49,16 @@ static const char iconExts[][5] = {
 };
 
 static const char subcats[][12] = {
-    "/apps", "/categories", "/places", "/devices", "/status",
-    "/actions",
+    "actions", "apps", "categories",
+    "devices",
+    // "emblems",
+    // "emotes",
+    // "mimetypes",
+    "places",
+    "status",
+    // "ui",
+    // "intl",
+    "legacy",
 };
 
 static bool hasImageExtension(const upath& base) {
@@ -215,8 +224,8 @@ private:
             if (strcmp(entry, "scalable") == 0) {
 #ifdef ICE_SUPPORT_SVG
                 auto& scaleCat = pools[fromResources].getCat(SCALABLE);
-                for (auto contentDir : subcats) {
-                    mstring path(iconPathToken, "/scalable", contentDir);
+                for (const char* sub : subcats) {
+                    mstring path(iconPathToken, "/scalable/", sub);
                     if (upath(path).dirExists()) {
                         ret += addPath(path, scaleCat);
                     }
@@ -253,20 +262,15 @@ private:
                     IconCategory& cat(pools[fromResources].getCat(size1));
                     mstring testPath(iconPathToken, "/", entry);
                     for (const char* sub : subcats) {
-                        mstring subPath(testPath + sub);
+                        mstring subPath(testPath, "/", sub);
                         if (upath(subPath).dirExists()) {
                             ret += addPath(subPath, cat);
                         }
                     }
                 }
             }
-            else if (*entry == 'a' ? strcmp(entry, "apps") == 0 ||
-                                     strcmp(entry, "actions") == 0 :
-                     *entry == 'c' ? strcmp(entry, "categories") == 0 :
-                     *entry == 'd' ? strcmp(entry, "devices") == 0 :
-                     *entry == 'p' ? strcmp(entry, "places") == 0 :
-                     *entry == 's' ? strcmp(entry, "status") == 0 :
-                     false)
+            else if (std::find_if(subcats, subcats + ACOUNT(subcats),
+                     [entry](const char* p) { return strcmp(entry, p) == 0; }))
             {
                 mstring subcatPath(iconPathToken, "/", entry);
                 IconDirectory subDir(subcatPath);
@@ -373,7 +377,8 @@ public:
         // now test the system icons folders specified by user or defaults
         csmart copy(newstr(iconPath));
         for (tokens folder(copy, ":"); folder; ++folder) {
-            probeIconFolder(folder.token(), false);
+            upath path(folder.token());
+            probeIconFolder(path.expand(), false);
         }
 
         dedupTestPath.clear();
@@ -388,7 +393,7 @@ public:
 
         // for compaction reasons, the lambdas return true on success,
         // but the success is only found in _this_ lambda only,
-        // and this is the only one which touches `result`!
+        // and this is the only one that touches `result`!
         auto checkFile = [&](upath path) {
             return path.fileExists() ? (res = path, true) : false;
         };
@@ -509,12 +514,12 @@ ref<YImage> YIcon::loadIcon(unsigned size) {
 #endif
                 icon = YImage::load(cs);
         }
-        else {
-            TLOG(("Icon not found: %s %ux%u", fPath.string(), size, size));
+        else if (XDBG || YTrace::traces("icon")) {
+            tlog("icon not found: %s %ux%u", fPath.string(), size, size);
         }
 
     }
-    // if the image data which was found in the expected file does not really
+    // if the image data that was found in the expected file does not really
     // match the filename, scale the data to fit
     if (icon != null) {
         if (size != icon->width() || size != icon->height()) {

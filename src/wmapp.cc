@@ -28,6 +28,7 @@
 #include "prefs.h"
 #include "udir.h"
 #include "ascii.h"
+#include "theminst.h"
 #include "ycursor.h"
 #include "yxcontext.h"
 #include "ytooltip.h"
@@ -486,6 +487,35 @@ void YWMApp::initPointers() {
     }
 }
 
+void YWMApp::keyboardRemap() {
+    reparseKeyPrefs();
+    for (KProgram* p : keyProgs) {
+        p->parse();
+    }
+    if (manager && !initializing && manager->isRunning()) {
+        manager->grabKeys();
+    }
+}
+
+void YWMApp::reparseKeyPrefs() {
+    extern cfoption icewm_preferences[];
+    for (cfoption* op = icewm_preferences; op->type; ++op) {
+        if (op->type == cfoption::CF_KEY) {
+            op->v.k.key_value->parse();
+        }
+    }
+}
+
+void YWMApp::fixupPreferences() {
+    extern cfoption icewm_preferences[];
+    for (cfoption* op = icewm_preferences; op->type; ++op) {
+        if (op->type == cfoption::CF_KEY) {
+            WMKey* key = op->v.k.key_value;
+            xapp->unshift(&key->key, &key->mod);
+        }
+    }
+}
+
 void LogoutMenu::updatePopup() {
     if (itemCount())
         return;
@@ -507,7 +537,8 @@ void LogoutMenu::updatePopup() {
                 addItem(_("Shut_down"), -2, null, actionShutdown, "shutdown");
             if (canSuspend())
                 addItem(_("_Sleep mode"), -2, null, actionSuspend, "suspend");
-
+            if (canHibernate())
+                addItem(_("_Hibernate"), -2, null, actionHibernate, "hibernate");
             if (itemCount() != oldItemCount)
                 addSeparator();
 
@@ -540,18 +571,18 @@ void MoveMenu::updatePopup() {
         char s[128];
         snprintf(s, sizeof s, "%2d.  %s ", w, workspaceNames[w - 1]);
         addItem(s, 1,
-                w ==  1 ? KEY_NAME(gKeySysWorkspace1TakeWin)  :
-                w ==  2 ? KEY_NAME(gKeySysWorkspace2TakeWin)  :
-                w ==  3 ? KEY_NAME(gKeySysWorkspace3TakeWin)  :
-                w ==  4 ? KEY_NAME(gKeySysWorkspace4TakeWin)  :
-                w ==  5 ? KEY_NAME(gKeySysWorkspace5TakeWin)  :
-                w ==  6 ? KEY_NAME(gKeySysWorkspace6TakeWin)  :
-                w ==  7 ? KEY_NAME(gKeySysWorkspace7TakeWin)  :
-                w ==  8 ? KEY_NAME(gKeySysWorkspace8TakeWin)  :
-                w ==  9 ? KEY_NAME(gKeySysWorkspace9TakeWin)  :
-                w == 10 ? KEY_NAME(gKeySysWorkspace10TakeWin) :
-                w == 11 ? KEY_NAME(gKeySysWorkspace11TakeWin) :
-                w == 12 ? KEY_NAME(gKeySysWorkspace12TakeWin) :
+                w ==  1 ? gKeySysWorkspace1TakeWin.name  :
+                w ==  2 ? gKeySysWorkspace2TakeWin.name  :
+                w ==  3 ? gKeySysWorkspace3TakeWin.name  :
+                w ==  4 ? gKeySysWorkspace4TakeWin.name  :
+                w ==  5 ? gKeySysWorkspace5TakeWin.name  :
+                w ==  6 ? gKeySysWorkspace6TakeWin.name  :
+                w ==  7 ? gKeySysWorkspace7TakeWin.name  :
+                w ==  8 ? gKeySysWorkspace8TakeWin.name  :
+                w ==  9 ? gKeySysWorkspace9TakeWin.name  :
+                w == 10 ? gKeySysWorkspace10TakeWin.name :
+                w == 11 ? gKeySysWorkspace11TakeWin.name :
+                w == 12 ? gKeySysWorkspace12TakeWin.name :
                 "", workspaceActionMoveTo[w - 1]);
     }
 }
@@ -608,34 +639,34 @@ YMenu* YWMApp::getWindowMenu() {
     windowMenu->setShared(true);
 
     if (strchr(winMenuItems, 'r'))
-        windowMenu->addItem(_("_Restore"),  -2, KEY_NAME(gKeyWinRestore), actionRestore);
+        windowMenu->addItem(_("_Restore"),  -2, gKeyWinRestore.name, actionRestore);
     if (strchr(winMenuItems, 'm'))
-        windowMenu->addItem(_("_Move"),     -2, KEY_NAME(gKeyWinMove), actionMove);
+        windowMenu->addItem(_("_Move"),     -2, gKeyWinMove.name, actionMove);
     if (strchr(winMenuItems, 's'))
-        windowMenu->addItem(_("_Size"),     -2, KEY_NAME(gKeyWinSize), actionSize);
+        windowMenu->addItem(_("_Size"),     -2, gKeyWinSize.name, actionSize);
     if (strchr(winMenuItems, 'n'))
-        windowMenu->addItem(_("Mi_nimize"), -2, KEY_NAME(gKeyWinMinimize), actionMinimize);
+        windowMenu->addItem(_("Mi_nimize"), -2, gKeyWinMinimize.name, actionMinimize);
     if (strchr(winMenuItems, 'x')) {
-        windowMenu->addItem(_("Ma_ximize"), -2, KEY_NAME(gKeyWinMaximize), actionMaximize);
-        windowMenu->addItem(_("Maximize_Vert"), -2, KEY_NAME(gKeyWinMaximizeVert), actionMaximizeVert);
-        windowMenu->addItem(_("MaximizeHori_z"), -2, KEY_NAME(gKeyWinMaximizeHoriz), actionMaximizeHoriz);
+        windowMenu->addItem(_("Ma_ximize"), -2, gKeyWinMaximize.name, actionMaximize);
+        windowMenu->addItem(_("Maximize_Vert"), -2, gKeyWinMaximizeVert.name, actionMaximizeVert);
+        windowMenu->addItem(_("MaximizeHori_z"), -2, gKeyWinMaximizeHoriz.name, actionMaximizeHoriz);
     }
     if (strchr(winMenuItems,'f') && allowFullscreen)
-        windowMenu->addItem(_("_Fullscreen"), -2, KEY_NAME(gKeyWinFullscreen), actionFullscreen);
+        windowMenu->addItem(_("_Fullscreen"), -2, gKeyWinFullscreen.name, actionFullscreen);
 
     if (strchr(winMenuItems, 'h'))
-        windowMenu->addItem(_("_Hide"),     -2, KEY_NAME(gKeyWinHide), actionHide);
+        windowMenu->addItem(_("_Hide"),     -2, gKeyWinHide.name, actionHide);
     if (strchr(winMenuItems, 'u'))
-        windowMenu->addItem(_("Roll_up"),   -2, KEY_NAME(gKeyWinRollup), actionRollup);
+        windowMenu->addItem(_("Roll_up"),   -2, gKeyWinRollup.name, actionRollup);
     if (strchr(winMenuItems, 'a') ||
         strchr(winMenuItems,'l') ||
         strchr(winMenuItems,'y') ||
         strchr(winMenuItems,'t'))
         windowMenu->addSeparator();
     if (strchr(winMenuItems, 'a'))
-        windowMenu->addItem(_("R_aise"),    -2, KEY_NAME(gKeyWinRaise), actionRaise);
+        windowMenu->addItem(_("R_aise"),    -2, gKeyWinRaise.name, actionRaise);
     if (strchr(winMenuItems, 'l'))
-        windowMenu->addItem(_("_Lower"),    -2, KEY_NAME(gKeyWinLower), actionLower);
+        windowMenu->addItem(_("_Lower"),    -2, gKeyWinLower.name, actionLower);
     if (strchr(winMenuItems, 'y'))
         windowMenu->addSubmenu(_("La_yer"), -2, layerMenu);
 
@@ -645,7 +676,7 @@ YMenu* YWMApp::getWindowMenu() {
     if (strchr(winMenuItems, 't') && workspaceCount > 1) {
         windowMenu->addSeparator();
         windowMenu->addSubmenu(_("Move _To"), -2, moveMenu);
-        windowMenu->addItem(_("Occupy _All"), -2, KEY_NAME(gKeyWinOccupyAll), actionOccupyAllOrCurrent);
+        windowMenu->addItem(_("Occupy _All"), -2, gKeyWinOccupyAll.name, actionOccupyAllOrCurrent);
     }
 
     /// this should probably go away, cause fullscreen will do mostly the same thing
@@ -662,12 +693,12 @@ YMenu* YWMApp::getWindowMenu() {
     if (strchr(winMenuItems, 'c') || strchr(winMenuItems, 'k'))
         windowMenu->addSeparator();
     if (strchr(winMenuItems, 'c'))
-        windowMenu->addItem(_("_Close"), -2, KEY_NAME(gKeyWinClose), actionClose);
+        windowMenu->addItem(_("_Close"), -2, gKeyWinClose.name, actionClose);
     if (strchr(winMenuItems, 'k'))
         windowMenu->addItem(_("_Kill Client"), -2, null, actionKill);
     if (strchr(winMenuItems, 'w')) {
         windowMenu->addSeparator();
-        windowMenu->addItem(_("_Window list"), -2, KEY_NAME(gKeySysWindowList), actionWindowList);
+        windowMenu->addItem(_("_Window list"), -2, gKeySysWindowList.name, actionWindowList);
     }
 
     return windowMenu;
@@ -874,21 +905,37 @@ bool YWMApp::mapClientByPid(const char* resource, long pid) {
     if (isEmpty(resource))
         return false;
 
-    bool found = false;
+    YFrameWindow* bestFrame = nullptr;
+    YFrameClient* bestTab = nullptr;
+    const int active = manager->activeWorkspace();
+    long tmp = 0;
 
     for (YFrameIter frame = manager->focusedIterator(); ++frame; ) {
-        long tmp = 0;
-        if (frame->client()->getNetWMPid(&tmp) && tmp == pid) {
-            if (frame->client()->classHint()->match(resource)) {
-                frame->setWorkspace(manager->activeWorkspace());
-                frame->activateWindow(true);
-                found = true;
-                break;
+        for (YFrameClient* tab : frame->clients()) {
+            if (tab->getNetWMPid(&tmp) && tmp == pid &&
+                tab->classHint()->match(resource)) {
+                if (bestFrame == nullptr ||
+                    (abs(frame->getWorkspace() - active) <
+                     abs(bestFrame->getWorkspace() - active))) {
+                    bestFrame = frame;
+                    bestTab = tab;
+                }
+                else if (frame == bestFrame && tab == frame->client())
+                    bestTab = tab;
             }
         }
+        if (bestFrame && bestFrame->getWorkspace() == active)
+            break;
+    }
+    if (bestFrame && bestTab) {
+        if (bestFrame->client() != bestTab)
+            bestFrame->selectTab(bestTab);
+        bestFrame->setWorkspace(active);
+        bestFrame->activateWindow(true);
+        return true;
     }
 
-    return found;
+    return false;
 }
 
 bool YWMApp::mapClientByResource(const char* resource, long *pid) {
@@ -928,6 +975,8 @@ void YWMApp::actionPerformed(YAction action, unsigned int /*modifiers*/) {
         doLogout(Shutdown);
     } else if (action == actionSuspend) {
         runCommand(suspendCommand);
+    } else if (action == actionHibernate) {
+        runCommand(hibernateCommand);
     } else if (action == actionReboot) {
         doLogout(Reboot);
     } else if (action == actionRestart) {
@@ -938,6 +987,15 @@ void YWMApp::actionPerformed(YAction action, unsigned int /*modifiers*/) {
         else
 #endif
             restartClient(nullptr, nullptr);
+    }
+    else if (action == actionIcewmbg) {
+        if (notifyParent && notifiedParent && kill(notifiedParent, SIGUSR2) == 0)
+            ;
+        else {
+            const char* bg[] = { ICEWMBGEXE, "-r", nullptr };
+            int pid = runProgram(bg[0], bg);
+            waitProgram(pid);
+        }
     }
     else if (action == actionRestartXterm) {
         delete fRestartMsgBox;
@@ -1264,6 +1322,13 @@ YWMApp::YWMApp(int *argc, char ***argv, const char *displayName,
     if (focusMode != FocusCustom)
         initFocusMode();
 
+    if (post_preferences)
+        WMConfig::printPrefs(focusMode, wmapp_preferences);
+    if (show_extensions)
+        showExtensions();
+
+    fixupPreferences();
+
     DEPRECATE(xrrDisable == true);
     DEPRECATE(warpPointer == true);
     DEPRECATE(focusRootWindow == true);
@@ -1290,14 +1355,11 @@ YWMApp::YWMApp(int *argc, char ***argv, const char *displayName,
 
     initPointers();
 
-    if (post_preferences)
-        WMConfig::printPrefs(focusMode, wmapp_preferences);
-    if (show_extensions)
-        showExtensions();
-
     delete desktop;
 
     managerWindow = registerProtocols1(*argv, *argc);
+    if (notifyParent == false && strequal("icewm", getenv("DESKTOP_SESSION")))
+        warn("Better start icewm via icewm-session");
 
     manager = new YWindowManager(this, this, this, nullptr, root());
     PRECONDITION(desktop != nullptr);
@@ -1448,6 +1510,8 @@ int YWMApp::mainLoop() {
             notifyParent = false;
             fail("notify parent");
         }
+        else
+            kill(notifiedParent, SIGUSR2);
     }
 
     int rc = super::mainLoop();
@@ -1532,16 +1596,16 @@ void YWMApp::afterWindowEvent(XEvent &xev) {
     static XEvent lastKeyEvent = { 0 };
 
     if (xev.type == KeyRelease && lastKeyEvent.type == KeyPress) {
-        KeySym k1 = XkbKeycodeToKeysym(xapp->display(), xev.xkey.keycode, 0, 0);
+        KeySym k1 = keyCodeToKeySym(xev.xkey.keycode);
         unsigned int m1 = KEY_MODMASK(lastKeyEvent.xkey.state);
-        KeySym k2 = XkbKeycodeToKeysym(xapp->display(), lastKeyEvent.xkey.keycode, 0, 0);
+        KeySym k2 = keyCodeToKeySym(lastKeyEvent.xkey.keycode);
 
         if (m1 == 0 && xapp->WinMask && win95keys) {
             if (k1 == xapp->Win_L && k2 == xapp->Win_L) {
                 manager->popupStartMenu(desktop);
             }
             else if (k1 == xapp->Win_R && k2 == xapp->Win_R) {
-                manager->doWMAction(ICEWM_ACTION_WINDOWLIST, true);
+                manager->doWMAction(ICEWM_ACTION_WINDOWLIST);
             }
         }
     }
@@ -1579,6 +1643,16 @@ static void print_usage(const char *argv0) {
              "  --rewrite-preferences  Update an existing preferences file.\n"
              "  --trace=conf,icon   Trace paths used to load configuration.\n"
              );
+    const char* output_preferences =
+             _(
+             "  -o, --output=FILE   Redirect all output to FILE.\n"
+             );
+    char* joint_preferences = cstrJoin(usage_preferences, output_preferences,
+                                       nullptr);
+    const char* install_preferences =
+             _(
+             "  -i, --install=THEME Install THEME from extra or 'list'.\n"
+             );
 
     printf(_("Usage: %s [OPTIONS]\n"
              "Starts the IceWM window manager.\n"
@@ -1587,19 +1661,17 @@ static void print_usage(const char *argv0) {
              "  -d, --display=NAME  NAME of the X server to use.\n"
              "%s"
              "  --sync              Synchronize X11 commands.\n"
-             "%s"
-             "\n"
+             "%s\n"
              "  -V, --version       Prints version information and exits.\n"
              "  -h, --help          Prints this usage screen and exits.\n"
-             "%s"
-             "\n"
+             "%s\n"
              "  --replace           Replace an existing window manager.\n"
              "  -r, --restart       Tell the running icewm to restart itself.\n"
              "\n"
              "  --configured        Print the compile time configuration.\n"
              "  --directories       Print the configuration directories.\n"
              "  -l, --list-themes   Print a list of all available themes.\n"
-             "\n"
+             "%s\n"
              "Environment variables:\n"
              "  ICEWM_PRIVCFG=PATH  Directory for user configuration files,\n"
              "                      \"$XDG_CONFIG_HOME/icewm\" if exists or\n"
@@ -1611,11 +1683,13 @@ static void print_usage(const char *argv0) {
              "%s\n\n"),
              argv0,
              usage_client_id,
-             usage_preferences,
+             joint_preferences,
              usage_debug,
+             install_preferences,
              PACKAGE_BUGREPORT[0] ? PACKAGE_BUGREPORT :
              PACKAGE_URL[0] ? PACKAGE_URL :
              "https://ice-wm.org/");
+    delete[] joint_preferences;
     exit(0);
 }
 
@@ -1736,12 +1810,16 @@ static void print_configured(const char *argv0) {
     exit(0);
 }
 
-static void loadStartup(const char* configFile)
+static void loadStartup(const char* configFile, const char* outputArg)
 {
     rightToLeft = YLocale::RTL();
     leftToRight = !rightToLeft;
 
     YConfig(wmapp_preferences).load(configFile);
+    if (nonempty(outputArg))
+        upath::redirectOutput(outputArg);
+    else if (nonempty(outputFile) && !(post_preferences | show_extensions))
+        upath::redirectOutput(outputFile);
 
     YXApplication::alphaBlending |= alphaBlending;
     YXApplication::synchronizeX11 |= synchronizeX11;
@@ -1760,6 +1838,7 @@ int main(int argc, char **argv) {
     bool rewrite_prefs(false);
     bool notify_parent(false);
     const char* configFile(nullptr);
+    const char* outputFile(nullptr);
     const char* displayName(nullptr);
     const char* overrideTheme(nullptr);
 
@@ -1776,15 +1855,7 @@ int main(int argc, char **argv) {
                 rewrite_prefs = true;
             else if (is_long_switch(*arg, "extensions"))
                 show_extensions = true;
-            else
-#ifdef DEBUG
-            if (is_long_switch(*arg, "debug"))
-                debug = true;
-            else if (is_long_switch(*arg, "debug-z"))
-                debug_z = true;
-            else
-#endif
-            if (is_switch(*arg, "r", "restart"))
+            else if (is_switch(*arg, "r", "restart"))
                 restart_wm = true;
             else if (is_long_switch(*arg, "replace"))
                 replace_wm = true;
@@ -1810,10 +1881,20 @@ int main(int argc, char **argv) {
                 YXApplication::alphaBlending = true;
             else if (GetArgument(value, "d", "display", arg, argv+argc))
                 displayName = value;
+            else if (GetArgument(value, "i", "install", arg, argv+argc))
+                install_theme(value);
+            else if (GetArgument(value, "o", "output", arg, argv+argc))
+                outputFile = value;
             else if (GetArgument(value, "s", "splash", arg, argv+argc))
                 splashFile = value;
             else if (GetLongArgument(value, "trace", arg, argv+argc))
                 YTrace::tracing(value);
+#ifdef DEBUG
+            else if (is_long_switch(*arg, "debug"))
+                debug = true;
+            else if (is_long_switch(*arg, "debug-z"))
+                debug_z = true;
+#endif
             else
                 warn(_("Unrecognized option '%s'."), *arg);
         }
@@ -1831,7 +1912,7 @@ int main(int argc, char **argv) {
 
     if (isEmpty(configFile))
         configFile = "preferences";
-    loadStartup(configFile);
+    loadStartup(configFile, outputFile);
 
     if (nonempty(overrideTheme)) {
         unsigned last = ACOUNT(wmapp_preferences) - 2;
@@ -1938,6 +2019,9 @@ void YWMApp::handleSMAction(WMAction message) {
         { ICEWM_ACTION_SUSPEND,       actionSuspend },
         { ICEWM_ACTION_WINOPTIONS,    actionWinOptions },
         { ICEWM_ACTION_RELOADKEYS,    actionReloadKeys },
+        { ICEWM_ACTION_ICEWMBG,       actionIcewmbg },
+        { ICEWM_ACTION_REFRESH,       actionRefresh },
+        { ICEWM_ACTION_HIBERNATE,     actionHibernate },
     };
     for (auto p : pairs)
         if (message == p.left)

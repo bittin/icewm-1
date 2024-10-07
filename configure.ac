@@ -2,10 +2,10 @@
 # Process this file with autoconf to produce a configure script.
 
 AC_PREREQ([2.69])
-AC_INIT([icewm],[3.3.0],
+AC_INIT([icewm],[3.4.6.130],
         [https://github.com/bbidulock/icewm/issues],
         [icewm],[https://ice-wm.org])
-AC_REVISION([3.3.0])
+AC_REVISION([3.4.6.130])
 
 # set better defaults
 AC_PREFIX_DEFAULT([/usr])
@@ -22,10 +22,10 @@ AC_CONFIG_AUX_DIR([scripts])
 AC_USE_SYSTEM_EXTENSIONS
 AC_CANONICAL_TARGET
 
-DATE='2022-12-20'
+DATE='2024-09-24'
 AC_SUBST([DATE])
 
-MDOCDATE='December 20, 2022'
+MDOCDATE='September 24, 2024'
 AC_SUBST([MDOCDATE])
 
 BRANCH='icewm-1-4-BRANCH'
@@ -37,7 +37,7 @@ TESTCASES="$TESTCASES iceview icesame iceicon icerun icelist icebar" # iceclock
 features=''
 
 # Initialize Automake
-AM_INIT_AUTOMAKE([gnits 1.12 dist-lzip no-dist-gzip std-options -Wall color-tests silent-rules tar-pax])
+AM_INIT_AUTOMAKE([1.12 dist-lzip no-dist-gzip std-options -Wall color-tests silent-rules tar-pax])
 AM_MAINTAINER_MODE
 AM_SILENT_RULES([yes])
 
@@ -87,7 +87,7 @@ LT_INIT([dlopen])
 LT_LANG([C++])
 AC_SUBST([LIBTOOL_DEPS])
 
-AM_GNU_GETTEXT_VERSION([0.19.2])
+AM_GNU_GETTEXT_VERSION([0.22])
 AM_GNU_GETTEXT([external])
 
 AC_ARG_ENABLE([i18n],
@@ -115,6 +115,9 @@ case "${target_os}" in
         AC_CHECK_LIB(socket, socketpair)
         AC_CHECK_LIB(nsl, gethostbyname)
         ;;
+    *openbsd*)
+        test x$enable_i18n != xno -a -z "$EXTRA_LIBS" && EXTRA_LIBS=-liconv
+        ;;
     *)
         :
         ;;
@@ -122,9 +125,6 @@ esac
 
 # Checks for header files.
 AS_BOX([Header Files])
-AC_HEADER_STDC
-AC_HEADER_DIRENT
-AC_HEADER_SYS_WAIT
 AC_PATH_X
 AC_PATH_XTRA
 AC_CHECK_HEADERS([execinfo.h sched.h sys/sched.h])
@@ -136,7 +136,6 @@ AC_CHECK_HEADER_STDBOOL
 AC_C_INLINE
 AC_TYPE_PID_T
 AC_TYPE_SIZE_T
-AC_HEADER_TIME
 AC_STRUCT_TM
 
 AC_CHECK_SIZEOF(char, 1)
@@ -350,7 +349,7 @@ AC_SUBST([GIO_CFLAGS])
 AC_SUBST([GIO_LIBS])
 
 AC_ARG_ENABLE([rsvg],
-    AS_HELP_STRING([--disable-rsvg],[Disable SVG using librsvg.]))
+    AS_HELP_STRING([--disable-librsvg],[Disable SVG using librsvg.]))
 AC_ARG_ENABLE([imlib2],
     AS_HELP_STRING([--disable-imlib2],[Disable imlib2 rendering.
         @<:@default=enabled@:>@]))
@@ -414,7 +413,7 @@ then
     fi
 
     if test "x$enable_nanosvg" != xyes &&
-       test "x$enable_rsvg" != xno
+       test "x$enable_librsvg" != xno
     then
         PKG_CHECK_MODULES([LIBRSVG],[librsvg-2.0],[
             IMAGE_CFLAGS="$LIBRSVG_CFLAGS $IMAGE_CFLAGS"

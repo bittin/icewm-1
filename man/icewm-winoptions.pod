@@ -66,8 +66,6 @@ Lastly, the I<OPTION: VALUE> pair refer to the options and values
 described below. A line with just a dot, followed by an option/value
 pair, applies to all windows.
 
-=back
-
 =head2 OPTIONS
 
 There are four categories: I<general>, I<function>, I<decor> and
@@ -193,6 +191,7 @@ the application:
   appTakesFocus:            {1|0}  let application take focus.
   doNotCover:               {1|0}  limits workspace if sticky.
   doNotFocus:               {1|0}  do not focus.
+  doNotManage:              {1|0}  do not manage.
   forcedClose:              {1|0}  no close confirmation dialog.
   fullKeys:                 {1|0}  don't install icewm key bindings.
   ignoreNoFocusHint:        {1|0}  focus even when no-input is set.
@@ -230,7 +229,7 @@ input focus to I<Chrome> pop-ups and asks to close them immediately.
   google-chrome.pop-up.startMinimized: 1
 
 IceWM places dockapps in a container automatically, but for those
-which fail to comply with the protocol it can also be emulated.
+that fail to comply with the protocol it can also be emulated.
 An emulated dockapp should appear on all workspaces, have
 no decorations, and always be visible in a fixed location.
 

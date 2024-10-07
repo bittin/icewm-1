@@ -2,8 +2,6 @@
 
 #include <unistd.h>
 #include <signal.h>
-#include <time.h>
-#include <sys/stat.h>
 #include <sys/resource.h>
 #include <stdlib.h>
 #include <X11/Xatom.h>
@@ -11,10 +9,12 @@
 #include "yprefs.h"
 #include "ytimer.h"
 #include "udir.h"
+#include "ascii.h"
 #include "intl.h"
 #include "appnames.h"
 
 #define CFGDEF
+#define ICEWMBG
 #include "icewmbg_prefs.h"
 
 char const *ApplicationName = nullptr;
@@ -23,11 +23,12 @@ typedef ref<YImage> Image;
 
 class Cache {
 public:
-    Cache() { }
+    Cache(bool verb) : verbose(verb) { }
     ~Cache() { clear(); }
     void clear() { iname = null; image = null; }
-    Image get(const mstring& name) {
+    Image get(mstring name) {
         if (iname != name) {
+            if (verbose) tlog("load %s", name.c_str());
             iname = name;
             image = YImage::load(iname);
             if (image == null && testOnce(iname, __LINE__)) {
@@ -39,6 +40,7 @@ public:
 private:
     mstring iname;
     Image image;
+    bool verbose;
 };
 
 class Background: public YXApplication, private YTimerListener {
@@ -49,6 +51,7 @@ public:
     void add(const char* name, const char* value, bool append);
     bool become(bool replace = false);
     void update(bool force = false);
+    void printOptions();
     void sendQuit()    { sendClientMessage(_XA_ICEWMBG_QUIT);    }
     void sendRestart() { sendClientMessage(_XA_ICEWMBG_RESTART); }
     void sendShuffle() { sendClientMessage(_XA_ICEWMBG_SHUFFLE); }
@@ -121,6 +124,7 @@ private:
     bool randInited;
     bool themeInited;
     bool imageInited;
+    bool forceUpdate;
     Strings backgroundImages;
     YColors backgroundColors;
     Strings transparencyImages;
@@ -139,6 +143,7 @@ private:
     lazy<YTimer> cycleTimer;
     lazy<YTimer> checkTimer;
     lazy<YTimer> randrTimer;
+    lazy<YTimer> updateTimer;
 
     Atom _XA_XROOTPMAP_ID;
     Atom _XA_XROOTCOLOR_PIXEL;
@@ -162,6 +167,8 @@ Background::Background(int *argc, char ***argv, bool verb):
     randInited(false),
     themeInited(false),
     imageInited(false),
+    forceUpdate(false),
+    cache(verb),
     mypid(getpid()),
     activeWorkspace(0),
     cycleOffset(0),
@@ -250,7 +257,7 @@ Background::~Background() {
 }
 
 int Background::mainLoop() {
-    update();
+    changeBackground(false);
     if (0 < cycleBackgroundsPeriod) {
         cycleTimer->setTimer(cycleBackgroundsPeriod * 1000L, this, true);
     }
@@ -262,20 +269,34 @@ Atom Background::atom(const char* name) const {
 }
 
 static bool hasImageExt(const char* name) {
-    size_t len = strlen(name);
-    if (len >= 5 && name[len - 4] == '.') {
-        const char* ext = &name[len - 3];
-        if (3 == strspn(ext, "jpngxmJPNGXM"))
-            return true;
-/* #ifdef CONFIG_LIBRSVG
-        if (0 == strcasecmp(ext, "svg"))
-            return true;
-* #endif */
-    }
-    else if (len >= 6 && name[len - 5] == '.') {
-        const char* ext = &name[len - 4];
-        if (0 == strcasecmp(ext, "jpeg"))
-            return true;
+    const char* dot = strrchr(name, '.');
+    if (dot) {
+        const char* ext = dot + 1;
+        size_t len = strlen(ext);
+        if (len > 2 && len < 5) {
+            char low[8];
+            for (int i = 0; i < int(len); ++i)
+                low[i] = ASCII::toLower(ext[i]);
+            low[int(len)] = '\0';
+            if (len == 3) {
+                if (strcmp(low, "xpm") == 0 ||
+                    strcmp(low, "png") == 0 ||
+                    strcmp(low, "jpg") == 0 ||
+                    (strcmp(low, "jxl") == 0 && YImage::supportsFormat(low)) ||
+                    (strcmp(low, "jp2") == 0 && YImage::supportsFormat(low)) ||
+                    (strcmp(low, "raw") == 0 && YImage::supportsFormat(low)) ||
+                    (strcmp(low, "svg") == 0 && YImage::supportsFormat(low)) ||
+                    (strcmp(low, "tga") == 0 && YImage::supportsFormat(low)) ||
+                    (strcmp(low, "tif") == 0 && YImage::supportsFormat(low)))
+                    return true;
+            }
+            if (len == 4) {
+                if (strcmp(low, "jpeg") == 0 ||
+                    (strcmp(low, "tiff") == 0 && YImage::supportsFormat(low)) ||
+                    (strcmp(low, "webp") == 0 && YImage::supportsFormat(low)))
+                    return true;
+            }
+        }
     }
     return false;
 }
@@ -429,6 +450,14 @@ bool Background::handleTimer(YTimer* timer) {
             update(true);
         }
     }
+    else if (timer == updateTimer) {
+        if (cycleTimer && cycleTimer->expires()) {
+            cycleTimer->startTimer();
+            cycleOffset += desktopCount;
+        }
+        changeBackground(forceUpdate);
+        forceUpdate = false;
+    }
     return false;
 }
 
@@ -525,9 +554,8 @@ void Background::startShuffle() {
 }
 
 void Background::update(bool force) {
-    activeWorkspace = getWorkspace();
-    if (verbose) tlog("update %s %d", boolstr(force), activeWorkspace);
-    changeBackground(force);
+    forceUpdate |= force;
+    updateTimer->setTimer(0L, this, true);
 }
 
 long* Background::getLongProperties(Atom property, int n) const {
@@ -663,6 +691,15 @@ ref<YPixmap> Background::renderBackground(Image back, YColor color) {
         }
         ref<YPixmap> pixm = todraw->renderToPixmap(g.rdepth());
         if (pixm != null) {
+            if (verbose) {
+                tlog(" ... @%d,%d %ux%u+%d+%d",
+                             max(0, int(bw - width) / 2),
+                             max(0, int(bh - height) / 2),
+                             min(width, bw),
+                             min(height, bh),
+                             max(x, x + int(width - bw) / 2),
+                             max(y, y + int(height - bh) / 2));
+            }
             g.drawPixmap(pixm,
                          max(0, int(bw - width) / 2),
                          max(0, int(bh - height) / 2),
@@ -677,6 +714,10 @@ ref<YPixmap> Background::renderBackground(Image back, YColor color) {
 }
 
 void Background::changeBackground(bool force) {
+    activeWorkspace = getWorkspace();
+    if (verbose)
+        tlog("update f=%s ws=%d", boolstr(force), activeWorkspace);
+
     Image backgroundImage = getBackgroundImage();
     YColor backgroundColor(getBackgroundColor());
     if (force == false) {
@@ -734,6 +775,9 @@ void Background::changeBackground(bool force) {
                            (unsigned char *) &tPixmap);
             changeProperty(_XA_XROOTCOLOR_PIXEL, XA_CARDINAL,
                            (unsigned char *) &tPixel);
+
+            if (currentTransparencyPixmap == null && tPixmap == bPixmap)
+                currentTransparencyPixmap = back;
         }
     }
     XClearWindow(display(), window());
@@ -893,6 +937,33 @@ bool Background::become(bool replace) {
     return pid == mypid;
 }
 
+void Background::printOptions() {
+    for (int k = 0; k < 10 && icewmbg_prefs[k].type; ++k) {
+        cfoption* o = &icewmbg_prefs[k];
+        switch (o->type) {
+            case cfoption::CF_BOOL:
+                printf("%-26s = %d\n", o->name, *o->v.b.bool_value);
+                break;
+            case cfoption::CF_INT:
+                printf("%-26s = %d\n", o->name, *o->v.i.int_value);
+                break;
+            default:
+                /*ignore*/
+                break;
+        }
+    }
+    printf("%-26s = ", "DesktopBackgroundImage");
+    int i = 0;
+    for (auto s : backgroundImages)
+        printf("%s%s", i++ ? ", " : "", s.c_str());
+    printf("\n");
+    printf("%-26s = ", "DesktopTransparencyImage");
+    i = 0;
+    for (auto s : transparencyImages)
+        printf("%s%s", i++ ? ", " : "", s.c_str());
+    printf("\n");
+}
+
 static const char* get_help_text() {
     return _(
     "Usage: icewmbg [OPTIONS]\n"
@@ -973,7 +1044,20 @@ static void bgLoadConfig(const char *configFile, const char *overrideTheme)
         };
         YConfig(theme_prefs).load(configFile).load("theme");
     }
-    YConfig(icewmbg_prefs).load(configFile).loadTheme().loadOverride();
+    YConfig conf(icewmbg_prefs);
+    conf.load(configFile);
+
+    cfoption* o = icewmbg_prefs;
+    while (o->type && *o->name != 'X')
+        ++o;
+    cfoption::OptionType type = cfoption::CF_NONE;
+    if (o)
+        swap(type, o->type);
+    conf.loadTheme();
+    if (o)
+        swap(type, o->type);
+
+    conf.loadOverride();
 }
 
 static void bgParse(const char* name, const char* value) {
@@ -981,7 +1065,7 @@ static void bgParse(const char* name, const char* value) {
     for (int i = 0; str.splitall(',', &opt, &str); ++i) {
         if (i + 1 < ICEBG_MAX_ARGS) {
             if ((opt = opt.trim()).nonempty()) {
-                globalBg->add(name, opt, 0 < i);
+                globalBg->add(name, opt, true);
             }
         }
     }
@@ -1039,26 +1123,46 @@ static bool sendMessage(const char* displayArg, const char* text) {
     return success;
 }
 
+static void appendFile(YArray<const char*>& image, const char* value) {
+    if (nonempty(value)) {
+        if (strchr("$/~", *value) == nullptr && access(value, R_OK) == 0) {
+            char buf[1234] = "";
+            char* pwd = getcwd(buf, sizeof buf);
+            if (pwd == buf && strlen(pwd) + strlen(value) + 2 < sizeof buf) {
+                strlcat(buf, "/", sizeof buf);
+                strlcat(buf, value, sizeof buf);
+                image += newstr(buf);
+            }
+        } else {
+            image += value;
+        }
+    }
+}
+
 int main(int argc, char **argv) {
     ApplicationName = my_basename(*argv);
 
+    bool daemonize = false;
     bool sendRestart = false;
     bool sendQuit = false;
+    bool postpref = false;
     bool replace = false;
     bool shuffle = false;
     bool verbose = false;
     const char* overrideTheme = nullptr;
     const char* configFile = nullptr;
-    const char* image = nullptr;
-    const char* color = nullptr;
-    const char* trans = nullptr;
-    const char* semis = nullptr;
+    typedef YArray<const char*> ArgVector;
+    ArgVector image;
+    ArgVector color;
+    ArgVector trans;
+    ArgVector semis;
     const char* center = nullptr;
     const char* scaled = nullptr;
     const char* multi = nullptr;
     const char* cycle = nullptr;
     const char* shuffleArg = nullptr;
     const char* displayArg = nullptr;
+    const char* outputArg = nullptr;
 
     for (char **arg = argv + 1; arg < argv + argc; ++arg) {
         if (**arg == '-') {
@@ -1066,6 +1170,9 @@ int main(int argc, char **argv) {
             if (is_switch(*arg, "r", "restart")) {
                 sendRestart = true;
                 **arg = '\0';
+            }
+            else if (is_switch(*arg, "f", "fork")) {
+                daemonize = true;
             }
             else if (is_switch(*arg, "q", "quit")) {
                 sendQuit = true;
@@ -1077,6 +1184,10 @@ int main(int argc, char **argv) {
                     (arg + 1 == argv + argc || strcspn(arg[1], "01")))
             {
                 shuffle = true;
+                shuffleArg = "1";
+            }
+            else if (is_long_switch(*arg, "postpreferences")) {
+                postpref = true;
             }
             else if (is_help_switch(*arg)) {
                 print_help_xit();
@@ -1097,16 +1208,16 @@ int main(int argc, char **argv) {
                 configFile = value;
             }
             else if (GetArgument(value, "i", "image", arg, argv + argc)) {
-                image = value;
+                appendFile(image, value);
             }
             else if (GetArgument(value, "k", "color", arg, argv + argc)) {
-                color = value;
+                color += value;
             }
             else if (GetArgument(value, "s", "semis", arg, argv + argc)) {
-                semis = value;
+                appendFile(semis, value);
             }
             else if (GetArgument(value, "x", "trans", arg, argv + argc)) {
-                trans = value;
+                trans += value;
             }
             else if (GetArgument(value, "e", "center", arg, argv + argc)) {
                 center = value;
@@ -1127,11 +1238,23 @@ int main(int argc, char **argv) {
             else if (GetArgument(value, "d", "display", arg, argv + argc)) {
                 displayArg = value;
             }
+            else if (GetArgument(value, "o", "output", arg, argv + argc)) {
+                outputArg = value;
+            }
             else if (GetArgument(value, "C", "copying", arg, argv + argc)) {
                 /*ignore*/;
             }
             else if (*arg)
                 warn(_("Unrecognized option '%s'."), *arg);
+        }
+        else if (hasImageExt(*arg)) {
+            appendFile(image, *arg);
+        }
+        else {
+            upath path(*arg + (**arg == '!'));
+            path = path.expand();
+            if (path.dirExists() && path.isSearchable())
+                appendFile(image, *arg);
         }
     }
 
@@ -1140,6 +1263,8 @@ int main(int argc, char **argv) {
             /*ignore*/;
         }
     }
+    if (outputArg)
+        upath::redirectOutput(outputArg);
 
     if (sendQuit) {
         sendMessage(displayArg, "_ICEWMBG_QUIT");
@@ -1155,34 +1280,28 @@ int main(int argc, char **argv) {
     }
 
     Background bg(&argc, &argv, verbose);
-
-    if (bg.become(replace) == false) {
-        if (shuffle) {
-            bg.sendShuffle();
-            return 0;
-        }
-        warn(_("Cannot start, because another icewmbg is still running."));
-        return 1;
-    }
-
     globalBg = &bg;
     bgLoadConfig(configFile, overrideTheme);
-    if (image) {
+    if (image.nonempty()) {
         bg.clearBackgroundImages();
-        bgParse("DesktopBackgroundImage", image);
+        for (const char* arg : image)
+            bgParse("DesktopBackgroundImage", arg);
     }
-    if (color) {
+    if (color.nonempty()) {
         bg.clearBackgroundColors();
-        bgParse("DesktopBackgroundColor", color);
+        for (const char* arg : color)
+            bgParse("DesktopBackgroundColor", arg);
     }
-    if (semis) {
+    if (semis.nonempty()) {
         bg.clearTransparencyImages();
-        bgParse("DesktopTransparencyImage", semis);
+        for (const char* arg : semis)
+            bgParse("DesktopTransparencyImage", arg);
         bg.enableSemitransparency();
     }
-    if (trans) {
+    if (trans.nonempty()) {
         bg.clearTransparencyColors();
-        bgParse("DesktopTransparencyColor", trans);
+        for (const char* arg : trans)
+            bgParse("DesktopTransparencyColor", arg);
         bg.enableSemitransparency();
     }
     testFlag(&centerBackground, center);
@@ -1205,7 +1324,34 @@ int main(int argc, char **argv) {
 #endif
     }
 
+    if (postpref) {
+        bg.printOptions();
+    }
+    if (bg.become(replace) == false) {
+        if (shuffle) {
+            bg.sendShuffle();
+            return 0;
+        }
+        warn(_("Cannot start, because another icewmbg is still running."));
+        return 1;
+    }
+
     globalBg = nullptr;
+    if (image.nonempty())
+        image.clear();
+    if (color.nonempty())
+        color.clear();
+    if (semis.nonempty())
+        semis.clear();
+    if (trans.nonempty())
+        trans.clear();
+
+    if (daemonize) {
+        if (daemon(1, 0) == -1)
+            fail("daemon");
+        if (nonempty(outputArg))
+            upath::redirectOutput(outputArg);
+    }
 
     return bg.mainLoop();
 }

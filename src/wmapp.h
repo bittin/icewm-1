@@ -139,6 +139,7 @@ private:
     virtual Cursor getRightPointer() const { return rightPointer; }
     virtual bool handleTimer(YTimer *timer);
     virtual int handleError(XErrorEvent *xev);
+    virtual void keyboardRemap();
     void runRestart(const char *path, char *const *args);
 
     FocusModel focusMode;
@@ -152,6 +153,8 @@ private:
     void initPointers();
     void initIcons();
     void initIconSize();
+    void reparseKeyPrefs();
+    void fixupPreferences();
 };
 
 extern YWMApp * wmapp;
@@ -213,7 +216,6 @@ extern lazy<TabsMenu> tabsMenu;
 
 class KProgram;
 typedef YObjectArray<KProgram> KProgramArrayType;
-typedef KProgramArrayType::IterType KProgramIterType;
 extern KProgramArrayType keyProgs;
 
 extern RebootShutdown rebootOrShutdown;

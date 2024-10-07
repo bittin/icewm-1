@@ -57,6 +57,7 @@ XIV(bool, trayShowAllWindows,                   true)
 XIV(bool, taskBarShowTransientWindows,          true)
 XIV(bool, taskBarShowAllWindows,                false)
 XIV(bool, taskBarShowWindowIcons,               true)
+XIV(bool, taskBarShowWindowTitles,              true)
 XIV(bool, taskBarAutoHide,                      false)
 XIV(bool, taskBarFullscreenAutoShow,            true)
 XIV(bool, taskBarDoubleHeight,                  false)
@@ -188,13 +189,20 @@ XSV(const char *, terminalCommand,              TERM " -hold")
 XSV(const char *, logoutCommand,                0)
 XSV(const char *, logoutCancelCommand,          0)
 #if __linux__
-XSV(const char *, shutdownCommand,              "test -e /run/systemd/system && systemctl poweroff")
-XSV(const char *, rebootCommand,                "test -e /run/systemd/system && systemctl reboot")
-XSV(const char *, suspendCommand,               "test -e /run/systemd/system && systemctl suspend")
+XSV(const char *, shutdownCommand,              "test -e /run/systemd/system && systemctl poweroff || loginctl poweroff")
+XSV(const char *, rebootCommand,                "test -e /run/systemd/system && systemctl reboot || loginctl reboot")
+XSV(const char *, suspendCommand,               "test -e /run/systemd/system && systemctl suspend || loginctl suspend")
+XSV(const char *, hibernateCommand,             "test -e /run/systemd/system && systemctl hibernate || loginctl hibernate")
+#elif __OpenBSD__ || __NetBSD__ || __FreeBSD__
+XSV(const char *, shutdownCommand,              "shutdown -p now")
+XSV(const char *, rebootCommand,                "shutdown -r now")
+XSV(const char *, suspendCommand,               "zzz")
+XSV(const char *, hibernateCommand,             0)
 #else
 XSV(const char *, shutdownCommand,              0)
 XSV(const char *, rebootCommand,                0)
 XSV(const char *, suspendCommand,               0)
+XSV(const char *, hibernateCommand,             0)
 #endif
 XIV(int, taskBarCPUDelay,                       500)
 XIV(int, taskBarMEMDelay,                       500)
@@ -260,7 +268,7 @@ cfoption icewm_preferences[] = {
     OBV("ConsiderHBorder",                      &considerHorizBorder,           "Consider border frames when maximizing horizontally"),
     OBV("ConsiderVBorder",                      &considerVertBorder,            "Consider border frames when maximizing vertically"),
     OBV("ConsiderSizeHintsMaximized",           &considerSizeHintsMaximized,    "Consider XSizeHints if frame is maximized"),
-    OBV("CenterMaximizedWindows",               &centerMaximizedWindows,        "Center maximized windows which can't fit the screen (like terminals)"),
+    OBV("CenterMaximizedWindows",               &centerMaximizedWindows,        "Center maximized windows that can't fit the screen (like terminals)"),
     OBV("HideBordersMaximized",                 &hideBordersMaximized,          "Hide window borders if window is maximized"),
     OBV("SizeMaximized",                        &sizeMaximized,                 "Maximized windows can be resized"),
     OBV("ShowMoveSizeStatus",                   &showMoveSizeStatus,            "Show position status window during move/resize"),
@@ -330,7 +338,8 @@ cfoption icewm_preferences[] = {
     OBV("TrayShowAllWindows",                   &trayShowAllWindows,            "Show windows from all workspaces on tray"),
     OBV("TaskBarShowTransientWindows",          &taskBarShowTransientWindows,   "Show transient (dialogs, ...) windows on task bar"),
     OBV("TaskBarShowAllWindows",                &taskBarShowAllWindows,         "Show windows from all workspaces on task bar"),
-    OBV("TaskBarShowWindowIcons",               &taskBarShowWindowIcons,        "Show icons of windows on the task bar"),
+    OBV("TaskBarShowWindowIcons",               &taskBarShowWindowIcons,        "Show icons of windows on task buttons of the task bar"),
+    OBV("TaskBarShowWindowTitles",              &taskBarShowWindowTitles,       "Show titles of windows on task buttons of the task bar"),
     OBV("TaskBarShowStartMenu",                 &taskBarShowStartMenu,          "Show 'Start' menu on task bar"),
     OBV("TaskBarShowWindowListMenu",            &taskBarShowWindowListMenu,     "Show 'window list' menu on task bar"),
     OBV("TaskBarShowCPUStatus",                 &taskBarShowCPUStatus,          "Show CPU status on task bar"),
@@ -434,7 +443,7 @@ cfoption icewm_preferences[] = {
 ///    OSV("Theme",                                &themeName,                     "Theme name"),
     OSV("IconPath",                             &iconPath,                      "Icon search path (colon separated)"),
     OSV("IconThemes",                           &iconThemes,                    "Colon separated icon theme list with wildcard support. Minus prefix - can be used to exclude themes."),
-    OSV("MailBoxPath",                          &mailBoxPath,                   "Colon separated paths of your mailboxes, otherwise $MAILPATH or $MAIL is used"),
+    OSV("MailBoxPath",                          &mailBoxPath,                   "Paths of mailboxes separated by a space, otherwise $MAILPATH or $MAIL is used"),
     OSV("MailCommand",                          &mailCommand,                   "Command to run on mailbox"),
     OSV("MailClassHint",                        &mailClassHint,                 "WM_CLASS to allow runonce for MailCommand"),
     OSV("NewMailCommand",                       &newMailCommand,                "Command to run when new mail arrives"),
@@ -449,6 +458,7 @@ cfoption icewm_preferences[] = {
     OSV("ShutdownCommand",                      &shutdownCommand,               "Command to shutdown the system"),
     OSV("RebootCommand",                        &rebootCommand,                 "Command to reboot the system"),
     OSV("SuspendCommand",                       &suspendCommand,                "Command to send the system to standby mode"),
+    OSV("HibernateCommand",                     &hibernateCommand,              "Command to hibernate the system"),
     OSV("CPUStatusCommand",                     &cpuCommand,                    "Command to run on CPU status"),
     OSV("CPUStatusClassHint",                   &cpuClassHint,                  "WM_CLASS to allow runonce for CPUStatusCommand"),
     OBV("CPUStatusCombine",                     &cpuCombine,                    "Combine all CPUs to one"),
@@ -459,7 +469,7 @@ cfoption icewm_preferences[] = {
     OSV("TimeFormat",                           &fmtTime,                       "Clock Time format (strftime format string)"),
     OSV("TimeFormatAlt",                        &fmtTimeAlt,                    "Alternate Clock Time format for blinking effects"),
     OSV("DateFormat",                           &fmtDate,                       "Clock Date format for tooltip (strftime format string)"),
-    OSV("DockApps",                             &dockApps,                       "Support DockApps (right, left, center, down, high, above, below, desktop, or empty to disable). Control with Ctrl+Mouse."),
+    OSV("DockApps",                             &dockApps,                       "Support DockApps (right, left, center, down, high, above, dock, ontop, normal, below, desktop, or empty to disable). The first five control positioning, while the next six set the layer. Control with Ctrl+Mouse."),
     OSV("XRRPrimaryScreenName",                 &xineramaPrimaryScreenName,     "screen/output name of the primary screen"),
     OSV("AcpiIgnoreBatteries",                  &acpiIgnoreBatteries,           "List of battery names (directories) in /proc/acpi/battery to ignore. Useful when more slots are built-in, but only one battery is used"),
 
@@ -468,9 +478,9 @@ cfoption icewm_preferences[] = {
     OKV("MouseWinRaise",                        gMouseWinRaise,                 "Mouse binding to raise window"),
     OKV("MouseWinLower",                        gMouseWinLower,                 "Mouse binding to lower window"),
     OKV("MouseWinTabbing",                      gMouseWinTabbing,               "Mouse binding to create tabs"),
-    OKV("KeyWinRaise",                          gKeyWinRaise,                   "Raises the window which currently has input focus."),
+    OKV("KeyWinRaise",                          gKeyWinRaise,                   "Raises the window that currently has input focus."),
     OKV("KeyWinOccupyAll",                      gKeyWinOccupyAll,               "Makes the active window occupy all work spaces."),
-    OKV("KeyWinLower",                          gKeyWinLower,                   "Lowers the window which currently has input focus."),
+    OKV("KeyWinLower",                          gKeyWinLower,                   "Lowers the window that currently has input focus."),
     OKV("KeyWinClose",                          gKeyWinClose,                   "Closes the active window."),
     OKV("KeyWinRestore",                        gKeyWinRestore,                 "Restores the active window to its visible state."),
     OKV("KeyWinPrev",                           gKeyWinPrev,                    "Switches focus to the previous window."),
@@ -573,6 +583,7 @@ cfoption icewm_preferences[] = {
 
 static bool alphaBlending;
 static bool synchronizeX11;
+static const char* outputFile;
 static const char* splashFile(ICESPLASH);
 static const char* tracingModules;
 extern bool loggingEvents;
@@ -581,6 +592,7 @@ cfoption wmapp_preferences[] = {
     OBV("Alpha",        &alphaBlending,  "Use a 32-bit visual for alpha blending"),
     OBV("Synchronize",  &synchronizeX11, "Synchronize X11 for debugging (slow)"),
     OBV("LogEvents",    &loggingEvents,  "Enable event logging for debugging"),
+    OSV("OutputFile",   &outputFile,     "Redirect all icewm output to FILE"),
     OSV("Splash",       &splashFile,     "Splash image on startup (IceWM.jpg)"),
     OSV("Trace",        &tracingModules, "Enable tracing for the given modules"),
     OSV("Theme",        &themeName,      "The name of the theme"),

@@ -29,6 +29,7 @@ struct ZItem {
     bool operator==(YFrameWindow* f) const { return f == frame && f; }
     bool operator==(YFrameClient* c) const { return c == client && c; }
     bool operator==(bool b) const { return bool(*this) == b; }
+    bool operator!=(bool b) const { return bool(*this) != b; }
     bool operator!() const { return bool(*this) == false; }
 
     static int compare(const void* p1, const void* p2) {
@@ -450,6 +451,7 @@ SwitchWindow::SwitchWindow(YWindow *parent, ISwitchItems *items,
     switchHl(&clrQuickSwitchActive),
     switchMfg(&clrActiveTitleBarText),
     switchFont(switchFontName),
+    keyPressed(0),
     modsDown(0)
 {
     // I prefer clrNormalMenu but some themes use inverted settings where
@@ -475,6 +477,10 @@ void SwitchWindow::close() {
 void SwitchWindow::cancel() {
     close();
     zItems->cancel();
+
+    YFrameWindow* f = manager->getFocus();
+    if (f && f->isFullscreen() && f->getActiveLayer() != WinLayerFullscreen)
+        f->updateLayer();
 }
 
 void SwitchWindow::accept() {
@@ -584,24 +590,29 @@ void SwitchWindow::repaint() {
 }
 
 void SwitchWindow::paint(Graphics &g, const YRect &/*r*/) {
+    int b1 = (wmLook != lookFlat);
+    int b2 = b1 * 2;
+    int b3 = b2 + 1;
+
     if (switchbackPixbuf != null &&
         (fGradient == null ||
-         fGradient->width() != width() - 2 ||
-         fGradient->height() != height() - 2))
+         fGradient->width() != width() - b2 ||
+         fGradient->height() != height() - b2))
     {
-        fGradient = switchbackPixbuf->scale(width() - 2, height() - 2);
+        fGradient = switchbackPixbuf->scale(width() - b2, height() - b2);
     }
 
     g.setColor(switchBg);
-    g.drawBorderW(0, 0, width() - 1, height() - 1, true);
+    if (b1)
+        g.drawBorderW(0, 0, width() - 1, height() - 1, true);
 
     if (fGradient != null)
-        g.drawImage(fGradient, 1, 1, width() - 2, height() - 2, 1, 1);
+        g.drawImage(fGradient, b1, b1, width() - b2, height() - b2, b1, b1);
     else
     if (switchbackPixmap != null)
-        g.fillPixmap(switchbackPixmap, 1, 1, width() - 3, height() - 3);
+        g.fillPixmap(switchbackPixmap, b1, b1, width() - b3, height() - b3);
     else
-        g.fillRect(1, 1, width() - 3, height() - 3);
+        g.fillRect(b1, b1, width() - b3, height() - b3);
 
     m_verticalStyle ? paintVertical(g) : paintHorizontal(g);
 }
@@ -940,6 +951,7 @@ bool SwitchWindow::handleKey(const XKeyEvent &key) {
     unsigned vm = VMod(m);
 
     if (key.type == KeyPress) {
+        keyPressed = k;
         if (isKey(k, vm)) {
             target(+1);
         }
@@ -1004,7 +1016,7 @@ bool SwitchWindow::handleKey(const XKeyEvent &key) {
         if ((isKey(k, vm) && !modDown(m)) || isModKey(key.keycode)) {
             accept();
         }
-        else if (k == XK_Escape) {
+        else if (k == XK_Escape && k == keyPressed) {
             zItems->setTarget(-1);
             cancel();
         }

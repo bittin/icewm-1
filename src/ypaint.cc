@@ -576,7 +576,7 @@ void Graphics::drawPixmap(ref<YPixmap> pix, int sx, int sy,
     Picture source = pix->picture(), destin = picture();
     if (source && destin) {
         XRenderComposite(display(), PictOpOver, source, None, destin,
-                         0, 0, 0, 0, dx - xOrigin, dy - yOrigin, w, h);
+                         sx, sy, 0, 0, dx - xOrigin, dy - yOrigin, w, h);
         return;
     }
 
@@ -658,7 +658,7 @@ void Graphics::compositeImage(ref<YImage> img, int sx, int sy, unsigned w, unsig
             XRenderComposite(display(),
                              img->hasAlpha() ? PictOpOver : PictOpSrc,
                              source, None, picture(),
-                             0, 0, 0, 0, rx, ry,
+                             sx, sy, 0, 0, rx, ry,
                              unsigned(rw), unsigned(rh));
             return;
         }
@@ -959,6 +959,18 @@ void Graphics::drawSurface(YSurface const & surface, int x, int y, unsigned w, u
     }
 }
 
+void Graphics::drawSurface(const YSurface& surf, int x, int y, unsigned w, unsigned h)
+{
+    if (surf.gradient != null)
+        drawGradient(surf.gradient, x, y, w, h);
+    else if (surf.pixmap != null)
+        fillPixmap(surf.pixmap, x, y, w, h);
+    else if (surf.color) {
+        setColor(surf.color);
+        fillRect(x, y, w, h);
+    }
+}
+
 void Graphics::drawGradient(ref<YImage> gradient,
                             int x, int y, unsigned w, unsigned h,
                             int gx, int gy, unsigned gw, unsigned gh)
@@ -966,6 +978,14 @@ void Graphics::drawGradient(ref<YImage> gradient,
     ref<YImage> scaled = gradient->scale(gw, gh);
     if (scaled != null)
         scaled->draw(*this, gx, gy, w, h, x, y);
+}
+
+void Graphics::drawGradient(ref<YImage> gradient,
+                            int x, int y, unsigned w, unsigned h)
+{
+    ref<YImage> scaled = gradient->scale(w, h);
+    if (scaled != null)
+        scaled->draw(*this, 0, 0, w, h, x, y);
 }
 
 /******************************************************************************/

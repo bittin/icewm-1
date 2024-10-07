@@ -766,7 +766,7 @@ void YXTray::backgroundChanged() {
     relayout(true);
     repaint();
     for (IterType ec = fDocked.iterator(); ++ec; ) {
-        /* something is not clearing which background changes */
+        /* something is not clearing the background */
         XClearArea(xapp->display(), ec->client_handle(), 0, 0, 0, 0, True);
         ec->repaint();
     }
@@ -860,7 +860,7 @@ void YXTray::trayUpdateGeometry(unsigned w, unsigned h, bool visible) {
 
 void YXTray::updateTrayWindows() {
     const int count = fDocked.getCount();
-    Window windows[count];
+    asmart<Window> windows(new Window[count]);
 
     for (IterType ec = fDocked.iterator(); ++ec; )
         windows[ec.where()] = ec->leader();

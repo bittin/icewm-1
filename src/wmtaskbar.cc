@@ -212,22 +212,22 @@ public:
 
         setActionListener(taskBar);
         // TRANSLATORS: This appears in a group with others items, so please make the hotkeys unique in the set: # T_ile Horizontally, Ca_scade, _Arrange, _Minimize All, _Hide All, _Undo, Arrange _Icons, _Windows, _Refresh, _About, _Logout
-        addItem(_("Tile _Vertically"), -2, KEY_NAME(gKeySysTileVertical), actionTileVertical);
+        addItem(_("Tile _Vertically"), -2, gKeySysTileVertical.name, actionTileVertical);
         // TRANSLATORS: This appears in a group with others items, so please make the hotkeys unique in the set: # T_ile Horizontally, Ca_scade, _Arrange, _Minimize All, _Hide All, _Undo, Arrange _Icons, _Windows, _Refresh, _About, _Logout
-        addItem(_("T_ile Horizontally"), -2, KEY_NAME(gKeySysTileHorizontal), actionTileHorizontal);
+        addItem(_("T_ile Horizontally"), -2, gKeySysTileHorizontal.name, actionTileHorizontal);
         // TRANSLATORS: This appears in a group with others items, so please make the hotkeys unique in the set: # T_ile Horizontally, Ca_scade, _Arrange, _Minimize All, _Hide All, _Undo, Arrange _Icons, _Windows, _Refresh, _About, _Logout
-        addItem(_("Ca_scade"), -2, KEY_NAME(gKeySysCascade), actionCascade);
+        addItem(_("Ca_scade"), -2, gKeySysCascade.name, actionCascade);
         // TRANSLATORS: This appears in a group with others items, so please make the hotkeys unique in the set: # T_ile Horizontally, Ca_scade, _Arrange, _Minimize All, _Hide All, _Undo, Arrange _Icons, _Windows, _Refresh, _About, _Logout
-        addItem(_("_Arrange"), -2, KEY_NAME(gKeySysArrange), actionArrange);
+        addItem(_("_Arrange"), -2, gKeySysArrange.name, actionArrange);
         // TRANSLATORS: This appears in a group with others items, so please make the hotkeys unique in the set: # T_ile Horizontally, Ca_scade, _Arrange, _Minimize All, _Hide All, _Undo, Arrange _Icons, _Windows, _Refresh, _About, _Logout
-        addItem(_("_Minimize All"), -2, KEY_NAME(gKeySysMinimizeAll), actionMinimizeAll);
+        addItem(_("_Minimize All"), -2, gKeySysMinimizeAll.name, actionMinimizeAll);
         // TRANSLATORS: This appears in a group with others items, so please make the hotkeys unique in the set: # T_ile Horizontally, Ca_scade, _Arrange, _Minimize All, _Hide All, _Undo, Arrange _Icons, _Windows, _Refresh, _About, _Logout
-        addItem(_("_Hide All"), -2, KEY_NAME(gKeySysHideAll), actionHideAll);
+        addItem(_("_Hide All"), -2, gKeySysHideAll.name, actionHideAll);
         // TRANSLATORS: This appears in a group with others items, so please make the hotkeys unique in the set: # T_ile Horizontally, Ca_scade, _Arrange, _Minimize All, _Hide All, _Undo, Arrange _Icons, _Windows, _Refresh, _About, _Logout
-        addItem(_("_Undo"), -2, KEY_NAME(gKeySysUndoArrange), actionUndoArrange);
+        addItem(_("_Undo"), -2, gKeySysUndoArrange.name, actionUndoArrange);
         if (minimizeToDesktop)
         // TRANSLATORS: This appears in a group with others items, so please make the hotkeys unique in the set: # T_ile Horizontally, Ca_scade, _Arrange, _Minimize All, _Hide All, _Undo, Arrange _Icons, _Windows, _Refresh, _About, _Logout
-            addItem(_("Arrange _Icons"), -2, KEY_NAME(gKeySysArrangeIcons), actionArrangeIcons);
+            addItem(_("Arrange _Icons"), -2, gKeySysArrangeIcons.name, actionArrangeIcons);
         addSeparator();
         // TRANSLATORS: This appears in a group with others items, so please make the hotkeys unique in the set: # T_ile Horizontally, Ca_scade, _Arrange, _Minimize All, _Hide All, _Undo, Arrange _Icons, _Windows, _Refresh, _About, _Logout
         addItem(_("_Windows"), -2, actionWindowList, windowListMenu);
@@ -302,7 +302,6 @@ void TaskBar::initApplets() {
     if (taskBarShowCollapseButton) {
         fCollapseButton = new ObjectButton(this, actionCollapseTaskbar);
         if (fCollapseButton) {
-            fCollapseButton->setWinGravity(StaticGravity);
             ref<YImage> image = leftToRight
                               ? taskbarCollapseImage : taskbarExpandImage;
             if (image != null) {
@@ -336,6 +335,7 @@ void TaskBar::initApplets() {
         fApplications->setImage(taskbarStartImage);
         fApplications->setToolTip(_("Favorite Applications"));
         fApplications->setTitle("TaskBarMenu");
+        fApplications->realize();
     } else
         fApplications = nullptr;
 
@@ -361,6 +361,7 @@ void TaskBar::initApplets() {
         fWinList->setActionListener(this);
         fWinList->setToolTip(_("Window List Menu"));
         fWinList->setTitle("ShowWindowList");
+        fWinList->realize();
     } else
         fWinList = nullptr;
     if (taskBarShowShowDesktopButton) {
@@ -370,10 +371,16 @@ void TaskBar::initApplets() {
         fShowDesktop->setActionListener(wmActionListener);
         fShowDesktop->setToolTip(_("Show Desktop"));
         fShowDesktop->setTitle("ShowDesktop");
+        fShowDesktop->realize();
     }
 
+    unsigned tall = 1;
+    if (taskBarDoubleHeight == false) {
+        for (YWindow* w = firstWindow(); w; w = w->nextSibling())
+            tall = max(tall, w->height());
+    }
     fWorkspaces = taskBarShowWorkspaces
-                ? new WorkspacesPane(this)
+                ? new WorkspacesPane(this, tall)
                 : new AWorkspaces(this);
     fWorkspaces->setTitle("Workspaces");
 
@@ -413,6 +420,7 @@ void TaskBar::initApplets() {
     }
 
     if (fCollapseButton) {
+        fCollapseButton->realize();
         fCollapseButton->raise();
     }
 }
@@ -672,9 +680,6 @@ void TaskBar::updateFullscreen() {
 void TaskBar::updateLocation() {
     fNeedRelayout = false;
 
-    if (getFrame() == nullptr) {
-        showBar();
-    }
     if (fIsHidden && !fIsCollapsed) {
         if (getFrame() && visible())
             getFrame()->wmHide();
@@ -742,6 +747,10 @@ void TaskBar::updateLocation() {
             setGeometry(YRect(x, y, w, h));
     }
     fEdgeTrigger->show((fFullscreen | fIsHidden) && !fIsCollapsed);
+
+    if (getFrame() == nullptr) {
+        showBar();
+    }
 
     ///!!! fix
     updateWMHints();
@@ -1009,6 +1018,7 @@ void TaskBar::actionPerformed(YAction action, unsigned int modifiers) {
 void TaskBar::handleCollapseButton() {
     fIsCollapsed = !fIsCollapsed;
     if (fCollapseButton) {
+        fCollapseButton->hide();
         ref<YImage> image = (leftToRight == fIsCollapsed)
                           ? taskbarExpandImage : taskbarCollapseImage;
         const char* text = (leftToRight == fIsCollapsed) ? "<" : ">";
@@ -1019,7 +1029,7 @@ void TaskBar::handleCollapseButton() {
             fCollapseButton->setText(text);
         }
         fCollapseButton->setToolTip(ttip);
-        fCollapseButton->repaint();
+        fCollapseButton->realize();
     }
 
     if (fIsCollapsed)
